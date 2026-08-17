@@ -45,6 +45,9 @@ public class DashScopeLlmService implements LlmService {
             JsonNode response = postJson(llmProperties.getBaseUrl() + "/services/aigc/text-generation/generation",
                     requestBody);
             String reply = response.path("output").path("text").asText();
+            if (reply.isEmpty()) {
+                reply = response.path("output").path("choices").path(0).path("message").path("content").asText();
+            }
             log.info("LLM回复: user={}, reply={}", userId, reply);
             return reply;
         } catch (Exception e) {
@@ -107,15 +110,72 @@ public class DashScopeLlmService implements LlmService {
             input.put("prompt", prompt);
             requestBody.set("input", input);
 
-            JsonNode response = postJson(llmProperties.getBaseUrl() + "/services/aigc/text2image/image-synthesis",
-                    requestBody);
+            ObjectNode parameters = objectMapper.createObjectNode();
+            parameters.put("size", "1024*1024");
+            parameters.put("n", 1);
+            requestBody.set("parameters", parameters);
 
-            String imageUrl = response.path("output").path("url").asText();
-            if (imageUrl.isEmpty()) {
-                imageUrl = response.path("output").path("results").path(0).path("url").asText();
+            String url = llmProperties.getBaseUrl() + "/services/aigc/text2image/image-synthesis";
+            String json = objectMapper.writeValueAsString(requestBody);
+            log.debug("POST {} body: {}", url, json);
+
+            Request request = new Request.Builder()
+                    .url(url)
+                    .header("Authorization", "Bearer " + llmProperties.getApiKey())
+                    .header("Content-Type", "application/json")
+                    .header("X-DashScope-Async", "enable")
+                    .post(RequestBody.create(json, MediaType.parse("application/json")))
+                    .build();
+
+            String taskId;
+            try (Response response = HTTP_CLIENT.newCall(request).execute()) {
+                String responseBody = response.body() != null ? response.body().string() : "";
+                log.debug("图片生成任务提交响应: status={}, body={}", response.code(), responseBody);
+                if (!response.isSuccessful()) {
+                    throw new RuntimeException("图片生成任务提交失败: " + response.code() + ", body: " + responseBody);
+                }
+                JsonNode jsonNode = objectMapper.readTree(responseBody);
+                taskId = jsonNode.path("output").path("task_id").asText();
+                if (taskId.isEmpty()) {
+                    throw new RuntimeException("未获取到任务ID: " + responseBody);
+                }
             }
-            log.info("LLM图片生成成功: url={}", imageUrl);
-            return imageUrl;
+
+            log.info("图片生成任务已提交: taskId={}", taskId);
+
+            String taskUrl = llmProperties.getBaseUrl().replace("/api/v1", "") + "/api/v1/tasks/" + taskId;
+            for (int i = 0; i < 60; i++) {
+                Thread.sleep(2000);
+                Request taskRequest = new Request.Builder()
+                        .url(taskUrl)
+                        .header("Authorization", "Bearer " + llmProperties.getApiKey())
+                        .get()
+                        .build();
+
+                try (Response taskResponse = HTTP_CLIENT.newCall(taskRequest).execute()) {
+                    String taskBody = taskResponse.body() != null ? taskResponse.body().string() : "";
+                    log.debug("轮询任务状态: body={}", taskBody);
+                    JsonNode taskNode = objectMapper.readTree(taskBody);
+                    String status = taskNode.path("output").path("task_status").asText();
+
+                    if ("SUCCEEDED".equals(status)) {
+                        String imageUrl = taskNode.path("output").path("results").path(0).path("url").asText();
+                        if (imageUrl.isEmpty()) {
+                            imageUrl = taskNode.path("output").path("results").path(0).path("b64_image").asText();
+                        }
+                        log.info("LLM图片生成成功: url={}", imageUrl);
+                        return imageUrl;
+                    } else if ("FAILED".equals(status)) {
+                        String errMsg = taskNode.path("output").path("message").asText();
+                        log.error("图片生成任务失败: {}", errMsg);
+                        return null;
+                    }
+                    log.info("图片生成中... status={}, attempt={}", status, i + 1);
+                }
+            }
+
+            log.error("图片生成超时");
+            return null;
         } catch (Exception e) {
             log.error("LLM图片生成失败", e);
             return null;

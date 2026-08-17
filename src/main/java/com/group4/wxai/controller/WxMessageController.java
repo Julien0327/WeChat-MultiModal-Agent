@@ -8,6 +8,9 @@ import me.chanjar.weixin.mp.bean.message.WxMpXmlMessage;
 import me.chanjar.weixin.mp.bean.message.WxMpXmlOutMessage;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
 @Slf4j
 @RestController
 @RequestMapping("/wx")
@@ -16,6 +19,8 @@ public class WxMessageController {
 
     private final WxMpService wxMpService;
     private final MessageRouter messageRouter;
+
+    private static final Set<String> processedMsgIds = ConcurrentHashMap.newKeySet();
 
     @GetMapping(value = "/msg", produces = "text/plain;charset=UTF-8")
     public String verify(@RequestParam("signature") String signature,
@@ -53,8 +58,17 @@ public class WxMessageController {
             inMessage = WxMpXmlMessage.fromXml(requestBody);
         }
 
-        log.info("解析消息: MsgType={}, FromUser={}, Content={}",
-                inMessage.getMsgType(), inMessage.getFromUser(), inMessage.getContent());
+        log.info("解析消息: MsgType={}, FromUser={}, Content={}, MsgId={}",
+                inMessage.getMsgType(), inMessage.getFromUser(), inMessage.getContent(), inMessage.getMsgId());
+
+        Long msgId = inMessage.getMsgId();
+        if (msgId != null && !processedMsgIds.add(String.valueOf(msgId))) {
+            log.info("重复消息已忽略: MsgId={}", msgId);
+            return "success";
+        }
+        if (processedMsgIds.size() > 1000) {
+            processedMsgIds.clear();
+        }
 
         WxMpXmlOutMessage outMessage = messageRouter.route(inMessage);
         if (outMessage == null) {
