@@ -1,0 +1,29 @@
+server:
+  port: 8080
+
+wx:
+  mp:
+    app-id: ${WX_APP_ID:your-app-id}
+    app-secret: ${WX_APP_SECRET:your-app-secret}
+    token: ${WX_TOKEN:your-token}
+    aes-key: ${WX_AES_KEY:your-aes-key}
+
+llm:
+  provider: dashscope
+  dashscope:
+    api-key: ${DASHSCOPE_API_KEY:your-api-key}
+    base-url: https://dashscope.aliyuncs.com/api/v1
+    text-model: qwen-plus
+    vision-model: qwen-vl-plus
+    image-model: wanx-v1
+    tts-model: cosyvoice-v1
+
+async:
+  core-pool-size: 2
+  max-pool-size: 10
+  queue-capacity: 100
+
+logging:
+  level:
+    com.group4.wxai: debug
+    me.chanjar.weixin: debug
