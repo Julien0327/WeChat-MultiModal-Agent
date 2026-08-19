@@ -11,8 +11,13 @@ public class LlmProperties {
 
     private String apiKey;
     private String baseUrl;
+    private String intentModel;
     private String textModel;
     private String visionModel;
     private String imageModel;
+    private String asrModel;
     private String ttsModel;
+    private String ttsVoice;
+    private String ttsFormat;
+    private int ttsSampleRate;
 }

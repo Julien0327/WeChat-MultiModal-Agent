@@ -13,10 +13,20 @@ llm:
   dashscope:
     api-key: ${DASHSCOPE_API_KEY:your-api-key}
     base-url: https://dashscope.aliyuncs.com/api/v1
+    intent-model: qwen-flash
     text-model: qwen-plus
     vision-model: qwen-vl-plus
     image-model: wanx2.1-t2i-turbo
-    tts-model: cosyvoice-v1
+    asr-model: qwen3-asr-flash
+    tts-model: cosyvoice-v3-flash
+    tts-voice: longanyang
+    tts-format: mp3
+    tts-sample-rate: 22050
+
+weather:
+  amap:
+    api-key: ${AMAP_WEATHER_API_KEY:}
+    base-url: https://restapi.amap.com/v3
 
 async:
   core-pool-size: 2

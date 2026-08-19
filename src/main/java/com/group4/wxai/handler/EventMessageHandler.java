@@ -25,8 +25,8 @@ public class EventMessageHandler implements MessageHandler {
         String replyContent;
         switch (event) {
             case "subscribe":
-                replyContent = "欢迎关注！我是智能客服助手，可以与你进行文字、图片和语音的交互。\n"
-                        + "发送文字与我聊天，发送图片让我帮你分析，发送语音与我对话。";
+                replyContent = "你好，有事直接跟我说就行。平时可以聊聊天、问问题，也可以查天气、找地点、生成图片。"
+                        + "你发图片我能看，发语音我也能听；想让我用语音回你，就直接说一声。";
                 break;
             case "unsubscribe":
                 log.info("用户取消关注: {}", userOpenId);

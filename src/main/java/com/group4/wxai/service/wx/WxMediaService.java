@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 
 @Slf4j
 @Service
@@ -32,6 +33,25 @@ public class WxMediaService {
         }
     }
 
+    public byte[] downloadTemporaryMedia(String mediaId) throws Exception {
+        if (mediaId == null || mediaId.isBlank()) {
+            throw new IllegalArgumentException("mediaId 不能为空");
+        }
+
+        File mediaFile = wxMpService.getMaterialService().mediaDownload(mediaId);
+        if (mediaFile == null || !mediaFile.isFile()) {
+            throw new IllegalStateException("微信临时素材下载失败");
+        }
+
+        try {
+            byte[] data = Files.readAllBytes(mediaFile.toPath());
+            log.info("微信临时素材下载成功: mediaId={}, size={} bytes", mediaId, data.length);
+            return data;
+        } finally {
+            Files.deleteIfExists(mediaFile.toPath());
+        }
+    }
+
     public String uploadImage(byte[] imageData, String extension) throws Exception {
         Path tempFile = Files.createTempFile("wx_image_", "." + extension);
         Files.write(tempFile, imageData);
@@ -46,8 +66,9 @@ public class WxMediaService {
         }
     }
 
-    public String uploadVoice(byte[] audioData) throws Exception {
-        Path tempFile = Files.createTempFile("wx_voice_", ".amr");
+    public String uploadVoice(byte[] audioData, String format) throws Exception {
+        String normalizedFormat = normalizeWechatVoiceFormat(format);
+        Path tempFile = Files.createTempFile("wx_voice_", "." + normalizedFormat);
         Files.write(tempFile, audioData);
         File file = tempFile.toFile();
         try {
@@ -58,5 +79,19 @@ public class WxMediaService {
         } finally {
             Files.deleteIfExists(tempFile);
         }
+    }
+
+    private String normalizeWechatVoiceFormat(String format) {
+        if (format == null) {
+            throw new IllegalArgumentException("语音格式不能为空");
+        }
+        String normalized = format.trim().toLowerCase(Locale.ROOT);
+        if ("mpeg".equals(normalized)) {
+            normalized = "mp3";
+        }
+        if (!"mp3".equals(normalized) && !"amr".equals(normalized)) {
+            throw new IllegalArgumentException("微信公众号语音回复仅支持 mp3 或 amr，当前格式: " + format);
+        }
+        return normalized;
     }
 }

@@ -28,24 +28,26 @@ public class ImageMessageHandler implements MessageHandler {
         String picUrl = inMessage.getPicUrl();
         log.info("图片消息: from={}, picUrl={}", userOpenId, picUrl);
 
-        WxMpXmlOutMessage placeholder = WxMpXmlOutMessage.TEXT()
-                .content("正在分析图片，请稍候...")
+        WxMpXmlOutMessage pendingReply = WxMpXmlOutMessage.TEXT()
+                .content("我先看一下这张图，稍等。")
                 .fromUser(inMessage.getToUser())
                 .toUser(userOpenId)
                 .build();
 
         processAsync(inMessage, userOpenId, picUrl);
-        return placeholder;
+        return pendingReply;
     }
 
     @Async("llmAsyncExecutor")
     public void processAsync(WxMpXmlMessage inMessage, String userOpenId, String picUrl) {
         try {
-            String description = llmService.chatWithImage(userOpenId, "请描述这张图片的内容", picUrl);
+            String description = llmService.chatWithImage(userOpenId,
+                    "直接用自然的中文聊天文本说说你在图里看到了什么。不要使用模板开场、角色标签或占位符。",
+                    picUrl);
             wxMessageService.sendTextMessage(userOpenId, description);
         } catch (Exception e) {
             log.error("异步处理图片消息失败: user={}", userOpenId, e);
-            wxMessageService.sendTextMessage(userOpenId, "抱歉，图片分析出现错误，请稍后重试。");
+            wxMessageService.sendTextMessage(userOpenId, "这张图刚才没看成功，等会儿再试一下。");
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.group4.wxai.service.wx;
 
+import com.group4.wxai.model.SynthesizedAudio;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import me.chanjar.weixin.mp.api.WxMpService;
@@ -42,17 +43,22 @@ public class WxMessageService {
         }
     }
 
-    public void sendVoiceMessage(String openid, byte[] audioData) {
+    public boolean sendVoiceMessage(String openid, SynthesizedAudio audio) {
         try {
-            String mediaId = wxMediaService.uploadVoice(audioData);
+            if (audio == null || audio.isEmpty()) {
+                return false;
+            }
+            String mediaId = wxMediaService.uploadVoice(audio.data(), audio.format());
             WxMpKefuMessage message = WxMpKefuMessage.VOICE()
                     .toUser(openid)
                     .mediaId(mediaId)
                     .build();
             wxMpService.getKefuService().sendKefuMessage(message);
             log.info("客服语音消息发送成功: to={}, mediaId={}", openid, mediaId);
+            return true;
         } catch (Exception e) {
             log.error("发送客服语音消息失败: to={}", openid, e);
+            return false;
         }
     }
 }

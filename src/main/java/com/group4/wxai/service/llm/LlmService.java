@@ -1,6 +1,7 @@
 package com.group4.wxai.service.llm;
 
 import com.group4.wxai.model.LlmMessage;
+import com.group4.wxai.model.SynthesizedAudio;
 
 import java.util.List;
 
@@ -12,5 +13,7 @@ public interface LlmService {
 
     String generateImage(String prompt);
 
-    byte[] textToSpeech(String text);
+    String speechToText(byte[] audioData, String audioFormat);
+
+    SynthesizedAudio textToSpeech(String text);
 }
