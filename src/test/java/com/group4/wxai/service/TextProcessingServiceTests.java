@@ -206,6 +206,25 @@ class TextProcessingServiceTests {
     }
 
     @Test
+    void routesTeamToolWithWechatUserContext() {
+        IntentResult toolIntent = new IntentResult(
+                IntentType.TEAM_TOOL, 0.99,
+                Map.of("tool", "expense", "action", "add", "amount", "25", "category", "餐饮"),
+                ReplyMode.AUTO, false, ""
+        );
+        when(intentClassifier.classify(eq("午饭花了25元，记到餐饮"), anyList())).thenReturn(toolIntent);
+        when(toolRegistry.execute("expense", USER_ID,
+                Map.of("action", "add", "amount", "25", "category", "餐饮")))
+                .thenReturn("已记账：25 元，分类：餐饮");
+
+        textProcessingService.processAsync(USER_ID, "午饭花了25元，记到餐饮");
+
+        verify(toolRegistry).execute("expense", USER_ID,
+                Map.of("action", "add", "amount", "25", "category", "餐饮"));
+        verify(wxMessageService).sendTextMessage(USER_ID, "已记账：25 元，分类：餐饮");
+    }
+
+    @Test
     void routesTripPlanningThroughTheGuardedConversationService() {
         IntentResult tripIntent = IntentResult.tripPlan(0.99, "江油", "", "明天", "1天");
         when(intentClassifier.classify(eq("帮我规划明天从江油出发的一日游"), anyList()))

@@ -99,6 +99,10 @@ public class HybridIntentClassifier implements IntentClassifier {
     private static final Pattern TEXT_REPLY_PATTERN = Pattern.compile(
             "(?:用|改用|换成)?\\s*(?:文字|文本)\\s*(?:来)?\\s*(?:回答|回复|告诉|说)(?:我)?"
     );
+    private static final Set<String> TEAM_TOOL_NAMES = Set.of(
+            "calculator", "translate", "history_today", "joke", "todo", "expense",
+            "reminder", "express_tracking"
+    );
 
     private static final String SYSTEM_PROMPT = """
             你是微信公众号智能客服的意图分类器。你的唯一任务是根据当前消息和最近对话进行分类，
@@ -111,6 +115,7 @@ public class HybridIntentClassifier implements IntentClassifier {
             - WEB_SEARCH：用户要求联网搜索实时信息、新闻、官网、近期变化或明确说“上网查”“联网搜索”。
             - WORLD_CLOCK：查询某个城市或时区当前几点、当地日期和时间。
             - TRIP_PLAN：用户明确要求规划旅行、出游或行程。只询问天气、地点或普通聊天时不能使用。
+            - TEAM_TOOL：用户明确要求计算、翻译、查询历史事件、讲笑话、管理待办、记账、设置提醒或查询快递。
             - GENERATE_IMAGE：用户明确要求创建、绘制或生成新图片。询问画家、绘画知识不属于该意图。
             - CLEAR_CONTEXT：用户明确要求清除、重置或忘记当前对话历史。
             - HELP：用户询问机器人会什么、如何使用或请求功能说明。
@@ -149,6 +154,18 @@ public class HybridIntentClassifier implements IntentClassifier {
             duration=7天、preference=雪山。当前消息没有偏好时 preference 必须为空字符串。
             信息不完整时仍输出 TRIP_PLAN、保留已知字段，并令 needsClarification=false；外部程序负责逐项询问，
             在四项齐全前不会调用任何出行工具。只有用户明确要求规划行程时才能使用 TRIP_PLAN。
+            TEAM_TOOL 时 slots.tool 必须是下列名称之一，并严格使用对应字段：
+            - calculator：a、b、operation（add/subtract/multiply/divide），三项必填。
+            - translate：text、target_language，二项必填；text 只能摘录用户给出的原文。
+            - history_today：month、day 可选，用户没说时留空，由程序使用北京时间今天。
+            - joke：无必填参数。
+            - todo：action=create/list/complete；create 必填 title，complete 必填 id；可选 due/status。
+            - expense：action=add/list/report；add 必填 amount；可选 category、note、date、month。
+            - reminder：action=set/list/cancel；set 必填 time 和 content，cancel 必填 id；可选 repeat。
+            - express_tracking：company 和 tracking_no 必填，phone 可选；缺少公司或单号时必须追问，禁止猜测。
+            所有 TEAM_TOOL 参数必须来自当前消息或紧邻的明确追问回答。用户没说的字段写空字符串，
+            禁止自行编造金额、待办内容、提醒时间、快递公司、单号或手机号。必填参数不全时仍输出 TEAM_TOOL，
+            并设置 needsClarification=true 和具体 clarificationQuestion；普通闲聊不得使用 TEAM_TOOL。
             replyMode 只允许 AUTO、TEXT、VOICE。用户明确要求“用语音回答”时使用 VOICE，
             明确要求“用文字回答”时使用 TEXT，否则使用 AUTO。回复形式不是业务意图。
             只有确实无法判断时才使用 UNKNOWN，并提供简短 clarificationQuestion。
@@ -224,7 +241,8 @@ public class HybridIntentClassifier implements IntentClassifier {
         }
 
         Matcher webSearchMatcher = STRONG_WEB_SEARCH_PATTERN.matcher(normalized);
-        if (webSearchMatcher.matches() && !webSearchMatcher.group(1).isBlank()) {
+        if (webSearchMatcher.matches() && !webSearchMatcher.group(1).isBlank()
+                && !isTeamToolCandidate(normalized)) {
             return IntentResult.webSearch(1, webSearchMatcher.group(1));
         }
 
@@ -238,6 +256,11 @@ public class HybridIntentClassifier implements IntentClassifier {
             return IntentResult.image(1, imageMatcher.group(1));
         }
         return null;
+    }
+
+    private boolean isTeamToolCandidate(String message) {
+        return message.matches(".*(?:快递|物流|待办|任务|记账|账单|支出|花销|月报|提醒|闹钟|"
+                + "翻译|笑话|历史上的今天|计算|算一下).*" );
     }
 
     private String extractDefinitionSubject(String message) {
@@ -388,6 +411,9 @@ public class HybridIntentClassifier implements IntentClassifier {
                     result.replyMode(), false, ""
             );
         }
+        if (result.intent() == IntentType.TEAM_TOOL) {
+            result = validateTeamTool(result, userMessage);
+        }
         if (result.intent() == IntentType.TRIP_PLAN) {
             IntentResult normalized = IntentResult.tripPlan(
                     result.confidence(),
@@ -413,6 +439,87 @@ public class HybridIntentClassifier implements IntentClassifier {
             return clarification(result, "我还不确定你想让我做什么，请再具体说明一下。");
         }
         return result;
+    }
+
+    private IntentResult validateTeamTool(IntentResult result, String userMessage) {
+        String tool = result.slot("tool");
+        if (!TEAM_TOOL_NAMES.contains(tool)) {
+            return clarification(result, "请再具体说明你要使用计算、翻译、待办、记账、提醒还是快递查询。");
+        }
+        if (result.needsClarification()) {
+            return result.clarificationQuestion().isBlank()
+                    ? clarification(result, "还缺少执行这个工具所需的信息，请补充完整。")
+                    : result;
+        }
+        String missing = switch (tool) {
+            case "calculator" -> firstMissing(result, "a", "b", "operation");
+            case "translate" -> firstMissing(result, "text", "target_language");
+            case "todo" -> requiredForAction(result, "title", "id");
+            case "expense" -> "add".equals(result.slot("action")) && result.slot("amount").isBlank()
+                    ? "amount" : result.slot("action").isBlank() ? "action" : "";
+            case "reminder" -> requiredForAction(result, "time,content", "id");
+            case "express_tracking" -> firstMissing(result, "company", "tracking_no");
+            default -> "";
+        };
+        if (!missing.isBlank()) {
+            return clarification(result, questionForTeamField(tool, missing));
+        }
+        for (String groundedField : List.of("a", "b", "text", "title", "amount", "content", "tracking_no", "id")) {
+            String value = result.slot(groundedField);
+            if (!value.isBlank() && !isGroundedInCurrentMessage(userMessage, value)) {
+                return clarification(result, "我没有从你这句话里确认到完整参数，请把要执行的内容再明确说一次。");
+            }
+        }
+        return result;
+    }
+
+    private String requiredForAction(IntentResult result, String createFields, String idField) {
+        String action = result.slot("action");
+        if (action.isBlank()) {
+            return "action";
+        }
+        if (Set.of("create", "set").contains(action)) {
+            return firstMissing(result, createFields.split(","));
+        }
+        if (Set.of("complete", "cancel").contains(action) && result.slot(idField).isBlank()) {
+            return idField;
+        }
+        return "";
+    }
+
+    private String firstMissing(IntentResult result, String... fields) {
+        for (String field : fields) {
+            if (result.slot(field).isBlank()) {
+                return field;
+            }
+        }
+        return "";
+    }
+
+    private boolean isGroundedInCurrentMessage(String message, String value) {
+        if (message == null || value == null) {
+            return false;
+        }
+        String normalizedMessage = message.replaceAll("\\s+", "");
+        String normalizedValue = value.replaceAll("\\s+", "");
+        return !normalizedValue.isBlank() && normalizedMessage.contains(normalizedValue);
+    }
+
+    private String questionForTeamField(String tool, String field) {
+        return switch (field) {
+            case "a", "b", "operation" -> "请把两个数字和要做的加、减、乘或除说完整。";
+            case "text" -> "请告诉我要翻译的原文。";
+            case "target_language" -> "请告诉我要翻译成哪种语言。";
+            case "title" -> "请告诉我要记录的待办内容。";
+            case "amount" -> "请告诉我这笔支出的金额。";
+            case "time" -> "你希望我什么时候提醒？";
+            case "content" -> "你希望我提醒什么？";
+            case "company" -> "请告诉我是哪家快递公司；我不会自行猜测。";
+            case "tracking_no" -> "请提供快递单号。";
+            case "id" -> "请提供对应记录的 ID；你可以先查看列表。";
+            case "action" -> "请说明你要新增、查看、完成还是取消。";
+            default -> "请补充执行该工具所需的信息。";
+        };
     }
 
     private boolean isExplicitHelpRequest(String message) {

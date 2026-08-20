@@ -17,4 +17,8 @@ public interface AiTool {
     }
 
     String execute(Map<String, String> arguments);
+
+    default String execute(ToolExecutionContext context, Map<String, String> arguments) {
+        return execute(arguments);
+    }
 }

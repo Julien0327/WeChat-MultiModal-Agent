@@ -39,7 +39,7 @@ public class TextProcessingService {
     );
 
     private static final String HELP_MESSAGE = """
-            有事直接说就行。我可以正常聊天和回答问题，也能查天气、找地点、看世界时间、联网搜索、规划出行、生成图片、看你发来的图片，还能听懂语音。
+            有事直接说就行。我可以正常聊天和回答问题，也能查天气、找地点、看世界时间、联网搜索、规划出行、计算、翻译、管理待办和账单、设置提醒、查快递、生成图片、看你发来的图片，还能听懂语音。
 
             比如你可以问“成都明天天气怎么样”“绵阳有哪些景点”“联网搜索最近的科技新闻”，或者说“帮我规划周六从江油去成都的一日游”。出行规划会先确认出发地、目的地、时间和时长，信息不全不会乱查。你也可以说“帮我画一只戴墨镜的猫”。我默认打字回复；想听语音就说“用语音回答我”，我会发送音频文件和 MP3 下载链接。要重新开始对话，可以说“清空聊天记录”。
             """;
@@ -108,6 +108,7 @@ public class TextProcessingService {
                 case WEB_SEARCH -> handleWebSearch(userOpenId, userContent, intent, replyMode);
                 case WORLD_CLOCK -> handleWorldClock(userOpenId, userContent, intent, replyMode);
                 case TRIP_PLAN -> handleTripPlanning(userOpenId, userContent, intent, replyMode);
+                case TEAM_TOOL -> handleTeamTool(userOpenId, userContent, intent, replyMode);
                 case GENERATE_IMAGE -> handleImageGeneration(userOpenId, userContent, intent.slot("prompt"));
                 case CLEAR_CONTEXT -> clearContext(userOpenId, replyMode);
                 case HELP -> sendReply(userOpenId, HELP_MESSAGE.strip(), replyMode);
@@ -168,6 +169,24 @@ public class TextProcessingService {
         } catch (Exception e) {
             log.error("执行出行规划失败: user={}", userOpenId, e);
             sendReply(userOpenId, "出行资料暂时没有查全，请稍后再试；我不会用不完整的信息替你乱编行程。", replyMode);
+        }
+    }
+
+    private void handleTeamTool(String userOpenId, String userContent, IntentResult intent,
+                                ReplyMode replyMode) {
+        String toolName = intent.slot("tool");
+        Map<String, String> arguments = new java.util.LinkedHashMap<>(intent.slots());
+        arguments.remove("tool");
+        try {
+            String reply = toolRegistry.execute(toolName, userOpenId, arguments);
+            ChatContext.addUserMessage(userOpenId, userContent);
+            ChatContext.addAssistantMessage(userOpenId, reply);
+            sendReply(userOpenId, reply, replyMode);
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            sendReply(userOpenId, e.getMessage(), replyMode);
+        } catch (Exception e) {
+            log.error("执行团队工具失败: user={}, tool={}", userOpenId, toolName, e);
+            sendReply(userOpenId, "这个工具暂时不可用，请稍后重试。", replyMode);
         }
     }
 

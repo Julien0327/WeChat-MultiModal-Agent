@@ -62,7 +62,7 @@ http(s)://你的公网域名/wx/msg
 
 1. 帮助、清除上下文、明确的画图、天气和地点搜索命令优先在本地判断，不消耗模型调用。
 2. 模糊表达交给 `qwen-flash`，并结合最近 6 条对话返回结构化 JSON。
-3. 程序支持 `CHAT`、`WEATHER`、`PLACE_SEARCH`、`WEB_SEARCH`、`WORLD_CLOCK`、`TRIP_PLAN`、`GENERATE_IMAGE`、`CLEAR_CONTEXT`、`HELP`、`UNKNOWN` 等意图。
+3. 程序支持 `CHAT`、`WEATHER`、`PLACE_SEARCH`、`WEB_SEARCH`、`WORLD_CLOCK`、`TRIP_PLAN`、`TEAM_TOOL`、`GENERATE_IMAGE`、`CLEAR_CONTEXT`、`HELP`、`UNKNOWN` 等意图。
 4. 动作置信度低于 `0.75`、工具参数缺失、图片提示词缺失或消息不明确时，不执行操作，而是追问用户。
 5. 意图模型不可用或 JSON 无法解析时，安全降级为普通聊天。
 
@@ -76,13 +76,54 @@ http(s)://你的公网域名/wx/msg
 
 ## AI 工具
 
-应用通过统一的 `AiTool` 接口和 `ToolRegistry` 注册、查找并执行工具。当前包含以下确定性工具，结果由外部数据源或程序计算返回：
+应用通过统一的 `AiTool` 接口和 `ToolRegistry` 注册、查找并执行受控工具。参数先由意图层校验，缺少必填项时先追问；结果来自程序计算、持久化数据、已配置的数据接口或指定模型能力：
 
 - `weather`：包装现有 `WeatherService`，查询实时天气和未来 7 天预报。
 - `place_search`：调用高德地点关键字搜索，在指定城市查询景点、餐厅、医院、学校等 POI。
 - `web_search`：使用 Tavily 联网搜索，并返回来源链接。
 - `world_clock`：根据 IANA 时区数据计算指定地点的当前时间。
 - `trip_plan`：在出发地、目的地、时间和时长齐全后组合天气、地点与搜索结果。
+- `calculator`：执行明确的加、减、乘、除计算，除数为 0 时拒绝执行。
+- `translate`：复用现有千问文本模型翻译用户明确给出的原文，不需要新 Key。
+- `history_today`：查询指定日期“历史上的今天”，依赖独立历史数据 API。
+- `joke`：从笑话数据 API 获取真实数据，不让模型临时编造接口结果。
+- `todo`：按微信用户新增、查看和完成待办，数据持久化到本地 JSON。
+- `expense`：按微信用户记账、查询月度明细和生成分类月报。
+- `reminder`：设置、查看和取消提醒；服务器持续运行时会主动推送微信消息。
+- `express_tracking`：通过快递100查询物流；缺少公司或单号时先追问，不自行猜测。
+
+### 团队工具配置
+
+待办、账单和提醒开箱即用，默认数据目录为 `data/team-tools`；该目录已经被 Git 忽略。翻译复用
+`DASHSCOPE_API_KEY`。历史、笑话和快递工具需要从对应组员处取得配置后写入 `.env`：
+
+```dotenv
+# jiangxiaofeng 分支使用的历史数据接口
+HISTORY_API_URL=
+HISTORY_API_KEY=
+
+# jiangxiaofeng 分支使用的笑话数据接口
+JOKE_API_URL=
+JOKE_API_KEY=
+
+# anliting 分支使用的快递100企业实时查询凭据
+EXPRESS_API_URL=https://poll.kuaidi100.com/poll/query.do
+EXPRESS_CUSTOMER=
+EXPRESS_API_KEY=
+```
+
+配置缺失不会阻止项目启动；只有调用相应工具时才会提示缺少哪一项。补齐 `.env` 并重启服务后即可启用，
+不需要再次修改 Java 代码。提醒工具无需额外 API，但需要服务器和微信 iLink/公众号会话保持在线。
+
+示例表达：
+
+- `计算 12.5 × 4`
+- `把“明天见”翻译成英文`
+- `帮我记个待办：明天下午交报告`
+- `午饭花了 25 元，记到餐饮`
+- `查看本月支出月报`
+- `10 分钟后提醒我喝水`
+- `查询顺丰快递 SF1234567890`
 
 ### 天气查询
 

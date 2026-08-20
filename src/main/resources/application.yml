@@ -46,6 +46,21 @@ web-search:
     base-url: https://api.tavily.com
     max-results: 5
 
+team-tools:
+  data-dir: ${TEAM_TOOLS_DATA_DIR:data/team-tools}
+  history:
+    api-url: ${HISTORY_API_URL:}
+    api-key: ${HISTORY_API_KEY:}
+  joke:
+    api-url: ${JOKE_API_URL:}
+    api-key: ${JOKE_API_KEY:}
+  express:
+    api-url: ${EXPRESS_API_URL:https://poll.kuaidi100.com/poll/query.do}
+    customer: ${EXPRESS_CUSTOMER:}
+    api-key: ${EXPRESS_API_KEY:}
+  reminder:
+    check-interval-ms: ${REMINDER_CHECK_INTERVAL_MS:30000}
+
 async:
   core-pool-size: 2
   max-pool-size: 10

@@ -7,6 +7,7 @@ public enum IntentType {
     WEB_SEARCH,
     WORLD_CLOCK,
     TRIP_PLAN,
+    TEAM_TOOL,
     GENERATE_IMAGE,
     CLEAR_CONTEXT,
     HELP,

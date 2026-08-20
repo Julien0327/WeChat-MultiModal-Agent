@@ -288,6 +288,51 @@ class HybridIntentClassifierTests {
         assertEquals(0.5, result.confidence(), 0.001);
     }
 
+    @Test
+    void acceptsGroundedTeamToolArguments() throws Exception {
+        stubModelResult("""
+                {"intent":"TEAM_TOOL","confidence":0.98,
+                 "slots":{"tool":"expense","action":"add","amount":"25","category":"餐饮","note":"午饭"},
+                 "replyMode":"AUTO","needsClarification":false,"clarificationQuestion":""}
+                """);
+
+        IntentResult result = classifier.classify("午饭花了25元，记到餐饮", List.of());
+
+        assertEquals(IntentType.TEAM_TOOL, result.intent());
+        assertEquals("expense", result.slot("tool"));
+        assertEquals("25", result.slot("amount"));
+    }
+
+    @Test
+    void keepsToolClarificationWhenRequiredExpressDataIsMissing() throws Exception {
+        stubModelResult("""
+                {"intent":"TEAM_TOOL","confidence":0.98,
+                 "slots":{"tool":"express_tracking","company":"","tracking_no":"SF123"},
+                 "replyMode":"AUTO","needsClarification":true,
+                 "clarificationQuestion":"请告诉我是哪家快递公司。"}
+                """);
+
+        IntentResult result = classifier.classify("查一下快递 SF123", List.of());
+
+        assertEquals(IntentType.TEAM_TOOL, result.intent());
+        assertTrue(result.needsClarification());
+        assertEquals("请告诉我是哪家快递公司。", result.clarificationQuestion());
+    }
+
+    @Test
+    void rejectsHallucinatedMutatingToolArguments() throws Exception {
+        stubModelResult("""
+                {"intent":"TEAM_TOOL","confidence":0.98,
+                 "slots":{"tool":"expense","action":"add","amount":"25","category":"餐饮"},
+                 "replyMode":"AUTO","needsClarification":false,"clarificationQuestion":""}
+                """);
+
+        IntentResult result = classifier.classify("帮我记一笔午饭", List.of());
+
+        assertEquals(IntentType.UNKNOWN, result.intent());
+        assertTrue(result.needsClarification());
+    }
+
     private void stubModelResult(String modelContent) throws IOException {
         ObjectNode responseJson = objectMapper.createObjectNode();
         ObjectNode message = objectMapper.createObjectNode();

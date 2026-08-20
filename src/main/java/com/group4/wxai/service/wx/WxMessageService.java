@@ -20,11 +20,15 @@ public class WxMessageService {
     private final ILinkClientManager iLinkClientManager;
 
     public void sendTextMessage(String openid, String content) {
+        trySendTextMessage(openid, content);
+    }
+
+    public boolean trySendTextMessage(String openid, String content) {
         try {
             if (iLinkClientManager.isILinkUser(openid)) {
                 iLinkClientManager.sendText(openid, content);
                 log.info("iLink 文本消息发送成功: to={}", openid);
-                return;
+                return true;
             }
             WxMpKefuMessage message = WxMpKefuMessage.TEXT()
                     .toUser(openid)
@@ -32,8 +36,10 @@ public class WxMessageService {
                     .build();
             wxMpService.getKefuService().sendKefuMessage(message);
             log.info("客服文本消息发送成功: to={}", openid);
+            return true;
         } catch (Exception e) {
             log.error("发送客服文本消息失败: to={}", openid, e);
+            return false;
         }
     }
 
