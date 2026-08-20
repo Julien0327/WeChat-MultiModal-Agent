@@ -1,0 +1,72 @@
+server:
+  port: 8080
+
+wx:
+  mp:
+    app-id: ${WX_APP_ID:your-app-id}
+    app-secret: ${WX_APP_SECRET:your-app-secret}
+    token: ${WX_TOKEN:your-token}
+    aes-key: ${WX_AES_KEY:your-aes-key}
+
+ilink:
+  enabled: ${ILINK_ENABLED:true}
+  admin-token: ${ILINK_ADMIN_TOKEN:}
+  session-file: ${ILINK_SESSION_FILE:data/ilink-session.json}
+  poll-error-backoff: ${ILINK_POLL_ERROR_BACKOFF:3s}
+  login-timeout: ${ILINK_LOGIN_TIMEOUT:3m}
+  channel-version: ${ILINK_CHANNEL_VERSION:1.0.0}
+
+llm:
+  provider: dashscope
+  dashscope:
+    api-key: ${DASHSCOPE_API_KEY:your-api-key}
+    base-url: https://dashscope.aliyuncs.com/api/v1
+    intent-model: qwen-flash
+    text-model: qwen-plus
+    vision-model: qwen-vl-plus
+    image-model: wanx2.1-t2i-turbo
+    asr-model: qwen3-asr-flash
+    tts-model: cosyvoice-v3-flash
+    tts-voice: longanyang
+    tts-format: mp3
+    tts-sample-rate: 22050
+
+weather:
+  amap:
+    api-key: ${AMAP_WEATHER_API_KEY:}
+    base-url: https://restapi.amap.com/v3
+
+audio-download:
+  public-base-url: ${PUBLIC_BASE_URL:}
+  ttl: 30m
+
+web-search:
+  tavily:
+    api-key: ${TAVILY_API_KEY:}
+    base-url: https://api.tavily.com
+    max-results: 5
+
+team-tools:
+  data-dir: ${TEAM_TOOLS_DATA_DIR:data/team-tools}
+  history:
+    api-url: ${HISTORY_API_URL:}
+    api-key: ${HISTORY_API_KEY:}
+  joke:
+    api-url: ${JOKE_API_URL:}
+    api-key: ${JOKE_API_KEY:}
+  express:
+    api-url: ${EXPRESS_API_URL:https://poll.kuaidi100.com/poll/query.do}
+    customer: ${EXPRESS_CUSTOMER:}
+    api-key: ${EXPRESS_API_KEY:}
+  reminder:
+    check-interval-ms: ${REMINDER_CHECK_INTERVAL_MS:30000}
+
+async:
+  core-pool-size: 2
+  max-pool-size: 10
+  queue-capacity: 100
+
+logging:
+  level:
+    com.group4.wxai: debug
+    me.chanjar.weixin: debug
