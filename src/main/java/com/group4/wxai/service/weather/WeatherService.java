@@ -49,11 +49,20 @@ public class WeatherService {
     public String getWeather(String requestedLocation, String dateSelector) {
         String locationQuery = validateLocation(requestedLocation);
         if (weatherProperties.isConfigured()) {
-            try {
-                return getAmapWeather(locationQuery, dateSelector);
-            } catch (Exception e) {
-                log.warn("高德天气查询失败，降级到 Open-Meteo: location={}, reason={}",
-                        locationQuery, e.getMessage());
+            if (requestsSevenDayForecast(dateSelector)) {
+                try {
+                    return getSevenDayWeatherWithAmapLocation(locationQuery, dateSelector);
+                } catch (Exception e) {
+                    log.warn("高德地点解析或七日天气查询失败，降级到 Open-Meteo 地点解析: location={}, reason={}",
+                            locationQuery, e.getMessage());
+                }
+            } else {
+                try {
+                    return getAmapWeather(locationQuery, dateSelector);
+                } catch (Exception e) {
+                    log.warn("高德天气查询失败，降级到 Open-Meteo: location={}, reason={}",
+                            locationQuery, e.getMessage());
+                }
             }
         }
         try {
@@ -66,6 +75,17 @@ public class WeatherService {
             log.error("天气查询失败: location={}", locationQuery, e);
             throw new IllegalStateException("天气服务暂时不可用，请稍后重试。", e);
         }
+    }
+
+    private boolean requestsSevenDayForecast(String dateSelector) {
+        if (dateSelector == null) {
+            return false;
+        }
+        String normalized = dateSelector.trim().toUpperCase(Locale.ROOT);
+        return Set.of(
+                "NEXT_7_DAYS", "未来七天", "未来7天", "最近七天", "最近7天",
+                "近七天", "近7天", "本周", "这周"
+        ).contains(normalized);
     }
 
     private String validateLocation(String requestedLocation) {
@@ -86,6 +106,19 @@ public class WeatherService {
         return formatAmapWeather(location, liveResponse, forecastResponse, dateSelector);
     }
 
+    private String getSevenDayWeatherWithAmapLocation(String requestedLocation,
+                                                      String dateSelector) throws IOException {
+        AmapLocation amapLocation = resolveAmapLocation(requestedLocation);
+        if (!Double.isFinite(amapLocation.latitude()) || !Double.isFinite(amapLocation.longitude())) {
+            throw new IllegalStateException("高德地点解析结果缺少经纬度");
+        }
+        ResolvedLocation location = new ResolvedLocation(
+                amapLocation.name(), amapLocation.province(), amapLocation.country(),
+                amapLocation.latitude(), amapLocation.longitude()
+        );
+        return formatWeather(location, fetchForecast(location), dateSelector);
+    }
+
     private AmapLocation resolveAmapLocation(String requestedLocation) throws IOException {
         HttpUrl url = amapUrl("/geocode/geo").newBuilder()
                 .addQueryParameter("key", weatherProperties.getApiKey())
@@ -104,7 +137,27 @@ public class WeatherService {
         String city = textValue(geocode.path("city"));
         String province = textValue(geocode.path("province"));
         String displayName = !district.isBlank() ? district : (!city.isBlank() ? city : requestedLocation);
-        return new AmapLocation(displayName, province, "中国", adcode);
+        double[] coordinates = parseAmapCoordinates(textValue(geocode.path("location")));
+        return new AmapLocation(
+                displayName, province, "中国", adcode, coordinates[0], coordinates[1]
+        );
+    }
+
+    private double[] parseAmapCoordinates(String value) {
+        if (value == null || value.isBlank()) {
+            return new double[]{Double.NaN, Double.NaN};
+        }
+        String[] parts = value.split(",", 2);
+        if (parts.length != 2) {
+            return new double[]{Double.NaN, Double.NaN};
+        }
+        try {
+            double longitude = Double.parseDouble(parts[0].trim());
+            double latitude = Double.parseDouble(parts[1].trim());
+            return new double[]{latitude, longitude};
+        } catch (NumberFormatException ignored) {
+            return new double[]{Double.NaN, Double.NaN};
+        }
     }
 
     private JsonNode fetchAmapWeather(String adcode, String extensions) throws IOException {
@@ -350,8 +403,8 @@ public class WeatherService {
     private DateSelection resolveDateSelection(String selector, JsonNode dates) {
         String normalized = selector == null ? "" : selector.trim().toUpperCase(Locale.ROOT);
         int days = switch (normalized) {
-            case "NEXT_3_DAYS", "未来三天", "未来3天", "近三天", "近3天" -> 3;
-            case "NEXT_7_DAYS", "未来七天", "未来7天", "本周", "这周" -> 7;
+            case "NEXT_3_DAYS", "未来三天", "未来3天", "最近三天", "最近3天", "近三天", "近3天" -> 3;
+            case "NEXT_7_DAYS", "未来七天", "未来7天", "最近七天", "最近7天", "近七天", "近7天", "本周", "这周" -> 7;
             default -> 1;
         };
         if (days > 1) {
@@ -489,7 +542,14 @@ public class WeatherService {
     private record DateSelection(int startIndex, int days) {
     }
 
-    private record AmapLocation(String name, String province, String country, String adcode) {
+    private record AmapLocation(
+            String name,
+            String province,
+            String country,
+            String adcode,
+            double latitude,
+            double longitude
+    ) {
         String displayName() {
             List<String> parts = new ArrayList<>();
             addDistinct(parts, name);

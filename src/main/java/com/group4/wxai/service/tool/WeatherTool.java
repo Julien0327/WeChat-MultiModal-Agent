@@ -25,6 +25,21 @@ public class WeatherTool implements AiTool {
     }
 
     @Override
+    public String inputJsonSchema() {
+        return """
+                {
+                  "type":"object",
+                  "properties":{
+                    "location":{"type":"string","minLength":1,"description":"用户明确提供的城市或地区，禁止从历史记录猜测"},
+                    "date":{"type":"string","description":"TODAY、TOMORROW、DAY_AFTER_TOMORROW、NEXT_3_DAYS、NEXT_7_DAYS 或 YYYY-MM-DD"}
+                  },
+                  "required":["location"],
+                  "additionalProperties":false
+                }
+                """;
+    }
+
+    @Override
     public String execute(Map<String, String> arguments) {
         return weatherService.getWeather(arguments.get("location"), arguments.get("date"));
     }

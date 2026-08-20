@@ -62,7 +62,13 @@ class HybridIntentClassifierTests {
         IntentResult help = classifier.classify("你能做什么", List.of());
         IntentResult voiceHelp = classifier.classify("你会说话吗", List.of());
         IntentResult weather = classifier.classify("成都明天天气怎么样", List.of());
+        IntentResult severalDaysWeather = classifier.classify("江油最近几天天气", List.of());
+        IntentResult sevenDayWeather = classifier.classify("最近七天江油天气", List.of());
         IntentResult place = classifier.classify("绵阳有哪些景点", List.of());
+        IntentResult webSearch = classifier.classify("帮我联网搜索千问最新消息", List.of());
+        IntentResult worldClock = classifier.classify("东京现在几点", List.of());
+        IntentResult defaultClock = classifier.classify("现在几点", List.of());
+        IntentResult weatherWithoutLocation = classifier.classify("今天天气怎么样", List.of());
 
         assertEquals(IntentType.GENERATE_IMAGE, image.intent());
         assertEquals("一只戴墨镜的猫", image.slot("prompt"));
@@ -72,9 +78,24 @@ class HybridIntentClassifierTests {
         assertEquals(IntentType.WEATHER, weather.intent());
         assertEquals("成都", weather.slot("location"));
         assertEquals("TOMORROW", weather.slot("date"));
+        assertEquals(IntentType.WEATHER, severalDaysWeather.intent());
+        assertEquals("江油", severalDaysWeather.slot("location"));
+        assertEquals("NEXT_3_DAYS", severalDaysWeather.slot("date"));
+        assertEquals(IntentType.WEATHER, sevenDayWeather.intent());
+        assertEquals("江油", sevenDayWeather.slot("location"));
+        assertEquals("NEXT_7_DAYS", sevenDayWeather.slot("date"));
         assertEquals(IntentType.PLACE_SEARCH, place.intent());
         assertEquals("绵阳", place.slot("location"));
         assertEquals("景点", place.slot("keyword"));
+        assertEquals(IntentType.WEB_SEARCH, webSearch.intent());
+        assertEquals("千问最新消息", webSearch.slot("query"));
+        assertEquals(IntentType.WORLD_CLOCK, worldClock.intent());
+        assertEquals("东京", worldClock.slot("location"));
+        assertEquals(IntentType.WORLD_CLOCK, defaultClock.intent());
+        assertEquals("北京", defaultClock.slot("location"));
+        assertEquals(IntentType.WEATHER, weatherWithoutLocation.intent());
+        assertEquals("", weatherWithoutLocation.slot("location"));
+        assertEquals("TODAY", weatherWithoutLocation.slot("date"));
         verify(okHttpClient, never()).newCall(any());
     }
 
@@ -92,6 +113,78 @@ class HybridIntentClassifierTests {
         assertEquals("成都", result.slot("location"));
         assertEquals("火锅店", result.slot("keyword"));
         assertFalse(result.needsClarification());
+    }
+
+    @Test
+    void rejectsSentenceFragmentsAsPlaceSearchArguments() throws Exception {
+        stubModelResult("""
+                {"intent":"PLACE_SEARCH","confidence":1.0,
+                 "slots":{"location":"有没","keyword":"近点的啊，我今天晚上还要回来睡觉"},
+                 "replyMode":"AUTO","needsClarification":false,"clarificationQuestion":""}
+                """);
+
+        IntentResult result = classifier.classify("有没有近点的啊，我今天晚上还要回来睡觉呢", List.of());
+
+        assertEquals(IntentType.CHAT, result.intent());
+        assertFalse(result.needsClarification());
+    }
+
+    @Test
+    void preservesAllTripPlanSchemaFieldsWithoutGuessingMissingValues() throws Exception {
+        stubModelResult("""
+                {"intent":"TRIP_PLAN","confidence":0.96,
+                 "slots":{"origin":"江油","departure_time":"明天","duration":"1天"},
+                 "replyMode":"AUTO","needsClarification":true,"clarificationQuestion":"随便猜一个目的地"}
+                """);
+
+        IntentResult result = classifier.classify("帮我规划明天从江油出发的一日游", List.of());
+
+        assertEquals(IntentType.TRIP_PLAN, result.intent());
+        assertEquals("江油", result.slot("origin"));
+        assertEquals("", result.slot("destination"));
+        assertEquals("明天", result.slot("departure_time"));
+        assertEquals("1天", result.slot("duration"));
+        assertFalse(result.needsClarification());
+    }
+
+    @Test
+    void removesWeatherLocationInferredFromHistoryInsteadOfGuessing() throws Exception {
+        stubModelResult("""
+                {"intent":"WEATHER","confidence":0.97,
+                 "slots":{"location":"耀州区","date":"TODAY"},
+                 "replyMode":"AUTO","needsClarification":false,"clarificationQuestion":""}
+                """);
+
+        IntentResult result = classifier.classify("外面冷不冷", List.of());
+
+        assertEquals(IntentType.WEATHER, result.intent());
+        assertEquals("", result.slot("location"));
+        assertEquals("TODAY", result.slot("date"));
+        assertFalse(result.needsClarification());
+    }
+
+    @Test
+    void routesDefinitionQuestionsToWebSearchWithoutCallingModel() {
+        IntentResult suffixQuestion = classifier.classify("人工智能是什么", List.of());
+        IntentResult prefixQuestion = classifier.classify("什么是大语言模型", List.of());
+
+        assertEquals(IntentType.WEB_SEARCH, suffixQuestion.intent());
+        assertEquals("人工智能 是什么", suffixQuestion.slot("query"));
+        assertEquals(IntentType.WEB_SEARCH, prefixQuestion.intent());
+        assertEquals("大语言模型 是什么", prefixQuestion.slot("query"));
+        verify(okHttpClient, never()).newCall(any());
+    }
+
+    @Test
+    void keepsPronounDefinitionQuestionsOutOfBlindSearch() throws Exception {
+        stubModelResult("""
+                {"intent":"CHAT","confidence":0.95,"slots":{},"replyMode":"AUTO",
+                 "needsClarification":false,"clarificationQuestion":""}
+                """);
+
+        IntentResult result = classifier.classify("你是什么", List.of());
+
+        assertEquals(IntentType.CHAT, result.intent());
     }
 
     @Test
@@ -151,6 +244,19 @@ class HybridIntentClassifierTests {
 
         assertEquals(IntentType.UNKNOWN, result.intent());
         assertTrue(result.needsClarification());
+    }
+
+    @Test
+    void correctsModelWhenInformationSourceQuestionIsMisclassifiedAsHelp() throws Exception {
+        stubModelResult("""
+                {"intent":"HELP","confidence":0.9,"slots":{},"replyMode":"AUTO",
+                 "needsClarification":false,"clarificationQuestion":""}
+                """);
+
+        IntentResult result = classifier.classify("你怎么获取到现在的时间的", List.of());
+
+        assertEquals(IntentType.CHAT, result.intent());
+        assertFalse(result.needsClarification());
     }
 
     @Test

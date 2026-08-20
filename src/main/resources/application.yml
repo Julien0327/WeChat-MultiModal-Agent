@@ -28,6 +28,16 @@ weather:
     api-key: ${AMAP_WEATHER_API_KEY:}
     base-url: https://restapi.amap.com/v3
 
+audio-download:
+  public-base-url: ${PUBLIC_BASE_URL:}
+  ttl: 30m
+
+web-search:
+  tavily:
+    api-key: ${TAVILY_API_KEY:}
+    base-url: https://api.tavily.com
+    max-results: 5
+
 async:
   core-pool-size: 2
   max-pool-size: 10

@@ -134,6 +134,50 @@ class WeatherServiceTests {
         assertEquals("all", requests.get(2).url().queryParameter("extensions"));
     }
 
+    @Test
+    void usesAmapCoordinatesForSevenDayForecast() throws Exception {
+        WeatherProperties properties = new WeatherProperties();
+        properties.setApiKey("test-amap-key");
+        properties.setBaseUrl("https://restapi.amap.test/v3");
+        weatherService = new WeatherService(okHttpClient, new ObjectMapper(), properties);
+
+        when(okHttpClient.newCall(any())).thenReturn(geocodingCall, forecastCall);
+        when(geocodingCall.execute()).thenReturn(jsonResponse("""
+                {"status":"1","info":"OK","geocodes":[{"province":"四川省",
+                "city":"绵阳市","district":"江油市","adcode":"510781",
+                "location":"104.745,31.778"}]}
+                """));
+        when(forecastCall.execute()).thenReturn(jsonResponse("""
+                {
+                  "current":{"time":"2026-08-20T12:00"},
+                  "daily":{
+                    "time":["2026-08-20","2026-08-21","2026-08-22","2026-08-23","2026-08-24","2026-08-25","2026-08-26"],
+                    "weather_code":[1,2,3,61,80,2,1],
+                    "temperature_2m_max":[31,30,29,27,28,30,32],
+                    "temperature_2m_min":[23,22,22,21,21,22,23],
+                    "precipitation_probability_max":[10,20,20,70,60,20,10],
+                    "sunrise":["06:00","06:01","06:01","06:02","06:03","06:03","06:04"],
+                    "sunset":["19:40","19:39","19:38","19:37","19:36","19:35","19:34"]
+                  }
+                }
+                """));
+
+        String result = weatherService.getWeather("江油", "NEXT_7_DAYS");
+
+        assertTrue(result.contains("📍 江油市 · 四川省 · 中国"));
+        assertTrue(result.contains("今天（8月20日"));
+        assertTrue(result.contains("8月26日"));
+
+        ArgumentCaptor<Request> requestCaptor = ArgumentCaptor.forClass(Request.class);
+        verify(okHttpClient, org.mockito.Mockito.times(2)).newCall(requestCaptor.capture());
+        assertEquals("restapi.amap.test", requestCaptor.getAllValues().get(0).url().host());
+        assertEquals("江油", requestCaptor.getAllValues().get(0).url().queryParameter("address"));
+        assertEquals("api.open-meteo.com", requestCaptor.getAllValues().get(1).url().host());
+        assertEquals("31.778", requestCaptor.getAllValues().get(1).url().queryParameter("latitude"));
+        assertEquals("104.745", requestCaptor.getAllValues().get(1).url().queryParameter("longitude"));
+        assertEquals("7", requestCaptor.getAllValues().get(1).url().queryParameter("forecast_days"));
+    }
+
     private Response jsonResponse(String json) throws IOException {
         Request request = new Request.Builder().url("https://example.test").build();
         return new Response.Builder()

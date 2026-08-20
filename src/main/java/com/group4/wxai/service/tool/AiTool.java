@@ -12,5 +12,9 @@ public interface AiTool {
 
     String description();
 
+    default String inputJsonSchema() {
+        return "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}";
+    }
+
     String execute(Map<String, String> arguments);
 }

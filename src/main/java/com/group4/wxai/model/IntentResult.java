@@ -56,6 +56,41 @@ public record IntentResult(
         );
     }
 
+    public static IntentResult webSearch(double confidence, String query) {
+        return new IntentResult(
+                IntentType.WEB_SEARCH,
+                confidence,
+                Map.of("query", query == null ? "" : query.trim()),
+                ReplyMode.AUTO,
+                false,
+                ""
+        );
+    }
+
+    public static IntentResult worldClock(double confidence, String location) {
+        return new IntentResult(
+                IntentType.WORLD_CLOCK,
+                confidence,
+                Map.of("location", location == null ? "" : location.trim()),
+                ReplyMode.AUTO,
+                false,
+                ""
+        );
+    }
+
+    public static IntentResult tripPlan(double confidence, String origin, String destination,
+                                        String departureTime, String duration) {
+        TripPlanRequest request = new TripPlanRequest(origin, destination, departureTime, duration);
+        return new IntentResult(
+                IntentType.TRIP_PLAN,
+                confidence,
+                request.toArguments(),
+                ReplyMode.AUTO,
+                false,
+                ""
+        );
+    }
+
     public static IntentResult unknown(String question) {
         return new IntentResult(IntentType.UNKNOWN, 0, Collections.emptyMap(), ReplyMode.AUTO, true, question);
     }

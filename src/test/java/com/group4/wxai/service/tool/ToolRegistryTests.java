@@ -17,13 +17,22 @@ class ToolRegistryTests {
     void registersAndExecutesNamedTools() {
         AiTool weather = mock(AiTool.class);
         AiTool placeSearch = mock(AiTool.class);
+        AiTool webSearch = mock(AiTool.class);
+        AiTool worldClock = mock(AiTool.class);
+        AiTool tripPlan = mock(AiTool.class);
         when(weather.name()).thenReturn(WeatherTool.NAME);
         when(placeSearch.name()).thenReturn(PlaceSearchTool.NAME);
+        when(webSearch.name()).thenReturn(WebSearchTool.NAME);
+        when(worldClock.name()).thenReturn(WorldClockTool.NAME);
+        when(tripPlan.name()).thenReturn(TripPlanningTool.NAME);
         when(weather.execute(Map.of("location", "成都"))).thenReturn("成都天气");
 
-        ToolRegistry registry = new ToolRegistry(List.of(weather, placeSearch));
+        ToolRegistry registry = new ToolRegistry(List.of(weather, placeSearch, webSearch, worldClock, tripPlan));
 
-        assertTrue(registry.names().containsAll(List.of(WeatherTool.NAME, PlaceSearchTool.NAME)));
+        assertTrue(registry.names().containsAll(List.of(
+                WeatherTool.NAME, PlaceSearchTool.NAME, WebSearchTool.NAME, WorldClockTool.NAME,
+                TripPlanningTool.NAME
+        )));
         assertEquals("成都天气", registry.execute(WeatherTool.NAME, Map.of("location", "成都")));
     }
 

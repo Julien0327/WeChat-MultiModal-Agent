@@ -1,6 +1,7 @@
 package com.group4.wxai.service.wx;
 
 import com.group4.wxai.model.SynthesizedAudio;
+import com.group4.wxai.service.audio.AudioDownloadService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import me.chanjar.weixin.mp.api.WxMpService;
@@ -14,6 +15,7 @@ public class WxMessageService {
 
     private final WxMpService wxMpService;
     private final WxMediaService wxMediaService;
+    private final AudioDownloadService audioDownloadService;
 
     public void sendTextMessage(String openid, String content) {
         try {
@@ -58,6 +60,27 @@ public class WxMessageService {
             return true;
         } catch (Exception e) {
             log.error("发送客服语音消息失败: to={}", openid, e);
+            return false;
+        }
+    }
+
+    public boolean sendMp3DownloadLink(String openid, SynthesizedAudio audio) {
+        return audioDownloadService.publishMp3(audio)
+                .map(url -> sendTextMessageSafely(openid, "MP3 文件（30 分钟内有效）：\n" + url))
+                .orElse(false);
+    }
+
+    private boolean sendTextMessageSafely(String openid, String content) {
+        try {
+            WxMpKefuMessage message = WxMpKefuMessage.TEXT()
+                    .toUser(openid)
+                    .content(content)
+                    .build();
+            wxMpService.getKefuService().sendKefuMessage(message);
+            log.info("客服 MP3 下载链接发送成功: to={}", openid);
+            return true;
+        } catch (Exception e) {
+            log.error("发送客服 MP3 下载链接失败: to={}", openid, e);
             return false;
         }
     }

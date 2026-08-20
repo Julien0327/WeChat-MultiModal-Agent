@@ -41,6 +41,13 @@ public class HybridIntentClassifier implements IntentClassifier {
     private static final Pattern CLEAR_CONTEXT_PATTERN = Pattern.compile(
             "^(清除|清空|删除|重置|忘掉|忘记).{0,8}(上下文|聊天记录|对话记录|历史记录|之前的对话|前面的内容)$"
     );
+    private static final Pattern EXPLICIT_HELP_PATTERN = Pattern.compile(
+            "^(?:请|麻烦)?(?:告诉我|介绍一下)?(?:你|机器人|这个机器人|公众号|这个公众号)?"
+                    + "(?:会做什么|能做什么|会什么|能干什么|支持什么|支持哪些功能|有哪些功能|有什么功能)"
+                    + "(?:呢|吗|呀)?[？?]?$"
+                    + "|^(?:请|麻烦)?(?:告诉我)?(?:你|机器人|这个机器人|公众号|这个公众号)?"
+                    + "(?:怎么用|如何使用|使用方法|使用说明)(?:呢|吗)?[？?]?$"
+    );
     private static final Pattern STRONG_IMAGE_PATTERN = Pattern.compile(
             "^(?:请|麻烦|可以|能不能)?\\s*(?:帮我)?\\s*"
                     + "(?:画(?!家|画)|绘制|生成(?:一张|一幅|一个|个|图片|图像)?|来一张|做一张|画图)\\s*(.+)$",
@@ -48,9 +55,9 @@ public class HybridIntentClassifier implements IntentClassifier {
     );
     private static final Pattern STRONG_WEATHER_PATTERN = Pattern.compile(
             "^(?:请|麻烦)?(?:帮我)?(?:查(?:一下)?|查询|看看|看一下)?\\s*"
-                    + "(?:(今天|明天|后天|未来(?:三|3|七|7)天|本周|这周)\\s*(?:的)?\\s*)?"
+                    + "(?:(今天|明天|后天|(?:未来|最近|近)(?:几|三|3|七|7)天|本周|这周)\\s*(?:的)?\\s*)?"
                     + "(.{2,40}?)"
-                    + "(?:(今天|明天|后天|未来(?:三|3|七|7)天|本周|这周))?"
+                    + "(?:(今天|明天|后天|(?:未来|最近|近)(?:几|三|3|七|7)天|本周|这周))?"
                     + "(?:的)?(?:天气|气温|温度)"
                     + "(?:怎么样|如何|预报|情况|是多少|多少度)?[？?]?$"
     );
@@ -58,6 +65,33 @@ public class HybridIntentClassifier implements IntentClassifier {
             "^(?:请|麻烦)?(?:帮我)?(?:查(?:一下)?|查询|搜索|找(?:一下)?|看看)?\\s*"
                     + "(.{2,30}?)(?:附近)?(?:有(?:什么|哪些)?|哪里有)\\s*"
                     + "(.{1,40}?)(?:推荐)?[吗呢？?]*$"
+    );
+    private static final Pattern STRONG_WORLD_CLOCK_PATTERN = Pattern.compile(
+            "^(?:请|麻烦)?(?:帮我)?(?:查(?:一下)?|查询|看看|看一下)?\\s*(?:现在)?\\s*"
+                    + "(.{1,80}?)(?:现在|当地)?(?:的)?(?:是)?(?:几点(?:钟)?(?:了)?|时间)"
+                    + "(?:是多少)?[？?]?$",
+            Pattern.CASE_INSENSITIVE
+    );
+    private static final Pattern DEFAULT_WORLD_CLOCK_PATTERN = Pattern.compile(
+            "^(?:请|麻烦)?(?:帮我)?(?:查(?:一下)?|查询|看看|看一下)?\\s*"
+                    + "(?:现在|当前)?(?:的)?(?:是)?(?:几点(?:钟)?(?:了)?|时间)"
+                    + "(?:是多少)?[？?]?$",
+            Pattern.CASE_INSENSITIVE
+    );
+    private static final Pattern STRONG_WEB_SEARCH_PATTERN = Pattern.compile(
+            "^(?:请|麻烦)?(?:帮我)?(?:联网|上网)?(?:搜索|搜一下|查一下|查询一下)\\s*(.{2,300})[？?]?$",
+            Pattern.CASE_INSENSITIVE
+    );
+    private static final Pattern PREFIX_DEFINITION_SEARCH_PATTERN = Pattern.compile(
+            "^(?:请|麻烦)?(?:告诉我|解释一下)?\\s*什么是\\s*(.{2,120}?)[？?]?$",
+            Pattern.CASE_INSENSITIVE
+    );
+    private static final Pattern SUFFIX_DEFINITION_SEARCH_PATTERN = Pattern.compile(
+            "^(?:请|麻烦)?(?:告诉我|解释一下)?\\s*(.{2,120}?)\\s*(?:是什么|是什么意思)[？?]?$",
+            Pattern.CASE_INSENSITIVE
+    );
+    private static final Set<String> CONTEXTUAL_DEFINITION_SUBJECTS = Set.of(
+            "你", "我", "他", "她", "它", "这", "这个", "那", "那个", "这些", "那些"
     );
     private static final Pattern VOICE_REPLY_PATTERN = Pattern.compile(
             "(?:用|改用|换成)?\\s*语音\\s*(?:来)?\\s*(?:回答|回复|告诉|说)(?:我)?"
@@ -74,6 +108,9 @@ public class HybridIntentClassifier implements IntentClassifier {
             - CHAT：普通问答、闲聊、知识咨询；这是默认意图。
             - WEATHER：查询某个城市或地区的实时天气、气温、降雨或未来天气预报。
             - PLACE_SEARCH：在指定城市或地区搜索景点、餐厅、医院、学校、商场等现实地点。
+            - WEB_SEARCH：用户要求联网搜索实时信息、新闻、官网、近期变化或明确说“上网查”“联网搜索”。
+            - WORLD_CLOCK：查询某个城市或时区当前几点、当地日期和时间。
+            - TRIP_PLAN：用户明确要求规划旅行、出游或行程。只询问天气、地点或普通聊天时不能使用。
             - GENERATE_IMAGE：用户明确要求创建、绘制或生成新图片。询问画家、绘画知识不属于该意图。
             - CLEAR_CONTEXT：用户明确要求清除、重置或忘记当前对话历史。
             - HELP：用户询问机器人会什么、如何使用或请求功能说明。
@@ -85,11 +122,31 @@ public class HybridIntentClassifier implements IntentClassifier {
             GENERATE_IMAGE 时从用户原话提取纯图片描述，放入 slots.prompt；不要自行补充用户未表达的主题。
             WEATHER 时必须提取 slots.location，并将日期写入 slots.date。date 只使用 TODAY、TOMORROW、
             DAY_AFTER_TOMORROW、NEXT_3_DAYS、NEXT_7_DAYS 或 YYYY-MM-DD；未指定日期时使用 TODAY。
+            location 必须来自用户当前消息明确说出的城市或地区。当前消息只说“今天天气怎么样”时，
+            location 必须是空字符串；禁止从历史对话、上次查询地点、IP 或常识中补全地点。
+            当前消息是在回答机器人刚才明确提出的地点追问时，才可以结合紧邻上下文提取该回答中的地点。
+            “最近几天”“最近三天”“近三天”按未来三天处理；“最近七天”“近七天”按未来七天处理。
             PLACE_SEARCH 时提取 slots.location 和 slots.keyword。例如“绵阳有哪些景点”应输出
             location=绵阳、keyword=景点；“江油哪里有医院”应输出 location=江油、keyword=医院。
+            location 和 keyword 都必须是当前消息明确出现的短语；“有没有近点的”“今晚想回来睡觉”等
+            行程偏好不是地点搜索，禁止把“有没”“近点的啊”等句子碎片填入地点字段。
+            WEB_SEARCH 时将完整但精简的搜索问题写入 slots.query，不要把“帮我搜索”“联网查一下”等前缀放入 query。
+            WORLD_CLOCK 时提取 slots.location，例如“东京现在几点”应输出 location=东京，
+            “UTC+5:30 是几点”应输出 location=UTC+5:30。未给城市或时区时默认 location=北京。
+            TRIP_PLAN 的 slots 必须始终严格使用下面的 JSON Schema；四个字段一个都不能省略，
+            用户没说的值必须写空字符串，禁止根据历史地点、IP、常识或模型判断自行猜测：
+            {"type":"object","properties":{"origin":{"type":"string"},"destination":{"type":"string"},
+            "departure_time":{"type":"string"},"duration":{"type":"string"}},
+            "required":["origin","destination","departure_time","duration"],"additionalProperties":false}
+            origin 是出发城市或地区；destination 是用户确认的目的城市或地区；departure_time 是出行日期
+            和可选时刻；duration 是游玩时长。用户明确说没想好目的地并要求推荐时，destination 写 RECOMMEND。
+            信息不完整时仍输出 TRIP_PLAN、保留已知字段，并令 needsClarification=false；外部程序负责逐项询问，
+            在四项齐全前不会调用任何出行工具。只有用户明确要求规划行程时才能使用 TRIP_PLAN。
             replyMode 只允许 AUTO、TEXT、VOICE。用户明确要求“用语音回答”时使用 VOICE，
             明确要求“用文字回答”时使用 TEXT，否则使用 AUTO。回复形式不是业务意图。
             只有确实无法判断时才使用 UNKNOWN，并提供简短 clarificationQuestion。
+            HELP 只用于询问机器人能力、功能列表或使用方法。“你怎么获取这个信息的”“你怎么知道时间”
+            是在询问信息来源或工作原理，必须分类为 CHAT，不能分类为 HELP。
             confidence 必须是 0 到 1 之间的数字。
             """;
 
@@ -111,7 +168,7 @@ public class HybridIntentClassifier implements IntentClassifier {
 
         try {
             JsonNode response = postClassificationRequest(userMessage.trim(), history);
-            return applyExplicitReplyMode(validate(parseResult(response)), explicitReplyMode);
+            return applyExplicitReplyMode(validate(parseResult(response), userMessage), explicitReplyMode);
         } catch (Exception e) {
             log.warn("意图模型调用失败，降级为普通聊天: reason={}", e.getMessage());
             return applyExplicitReplyMode(IntentResult.of(IntentType.CHAT, 0.5), explicitReplyMode);
@@ -134,6 +191,9 @@ public class HybridIntentClassifier implements IntentClassifier {
             String dateExpression = weatherMatcher.group(1) != null
                     ? weatherMatcher.group(1)
                     : weatherMatcher.group(3);
+            if (isWeatherDateExpression(location) && dateExpression == null) {
+                return IntentResult.weather(1, "", normalizeWeatherDate(location));
+            }
             if (!location.isBlank()) {
                 return IntentResult.weather(1, location, normalizeWeatherDate(dateExpression));
             }
@@ -143,9 +203,27 @@ public class HybridIntentClassifier implements IntentClassifier {
         if (placeMatcher.matches()) {
             String location = placeMatcher.group(1).trim().replaceFirst("(?:的)?附近$", "");
             String keyword = placeMatcher.group(2).trim().replaceFirst("^(?:的|附近的)", "");
-            if (!location.isBlank() && !keyword.isBlank()) {
+            if (isPlausiblePlaceLocation(location) && isPlausiblePlaceKeyword(keyword)) {
                 return IntentResult.placeSearch(1, location, keyword);
             }
+        }
+
+        if (DEFAULT_WORLD_CLOCK_PATTERN.matcher(normalized).matches()) {
+            return IntentResult.worldClock(1, "北京");
+        }
+        Matcher worldClockMatcher = STRONG_WORLD_CLOCK_PATTERN.matcher(normalized);
+        if (worldClockMatcher.matches() && !worldClockMatcher.group(1).isBlank()) {
+            return IntentResult.worldClock(1, worldClockMatcher.group(1));
+        }
+
+        Matcher webSearchMatcher = STRONG_WEB_SEARCH_PATTERN.matcher(normalized);
+        if (webSearchMatcher.matches() && !webSearchMatcher.group(1).isBlank()) {
+            return IntentResult.webSearch(1, webSearchMatcher.group(1));
+        }
+
+        String definitionSubject = extractDefinitionSubject(normalized);
+        if (definitionSubject != null) {
+            return IntentResult.webSearch(1, definitionSubject + " 是什么");
         }
 
         Matcher imageMatcher = STRONG_IMAGE_PATTERN.matcher(normalized);
@@ -153,6 +231,30 @@ public class HybridIntentClassifier implements IntentClassifier {
             return IntentResult.image(1, imageMatcher.group(1));
         }
         return null;
+    }
+
+    private String extractDefinitionSubject(String message) {
+        Matcher prefixMatcher = PREFIX_DEFINITION_SEARCH_PATTERN.matcher(message);
+        if (prefixMatcher.matches()) {
+            return normalizeDefinitionSubject(prefixMatcher.group(1));
+        }
+        Matcher suffixMatcher = SUFFIX_DEFINITION_SEARCH_PATTERN.matcher(message);
+        if (suffixMatcher.matches()) {
+            return normalizeDefinitionSubject(suffixMatcher.group(1));
+        }
+        return null;
+    }
+
+    private String normalizeDefinitionSubject(String value) {
+        if (value == null) {
+            return null;
+        }
+        String subject = value.trim();
+        if (subject.isBlank() || CONTEXTUAL_DEFINITION_SUBJECTS.contains(subject)
+                || subject.startsWith("你觉得") || subject.startsWith("你认为")) {
+            return null;
+        }
+        return subject;
     }
 
     private JsonNode postClassificationRequest(String userMessage, List<LlmMessage> history) throws Exception {
@@ -241,15 +343,55 @@ public class HybridIntentClassifier implements IntentClassifier {
         );
     }
 
-    private IntentResult validate(IntentResult result) {
-        if (result.intent() == IntentType.WEATHER && result.slot("location").isBlank()) {
-            return clarification(result, "请告诉我你要查询哪个城市或地区的天气。");
+    private IntentResult validate(IntentResult result, String userMessage) {
+        if (result.intent() == IntentType.HELP && !isExplicitHelpRequest(userMessage)) {
+            return IntentResult.of(IntentType.CHAT, Math.max(0.8, result.confidence()));
+        }
+        if (result.intent() == IntentType.WEATHER) {
+            String location = result.slot("location");
+            if (!isExplicitLocationInCurrentMessage(userMessage, location)) {
+                location = "";
+            }
+            IntentResult normalized = IntentResult.weather(
+                    result.confidence(), location, result.slot("date")
+            );
+            result = new IntentResult(
+                    normalized.intent(), normalized.confidence(), normalized.slots(),
+                    result.replyMode(), false, ""
+            );
         }
         if (result.intent() == IntentType.PLACE_SEARCH && result.slot("location").isBlank()) {
             return clarification(result, "请告诉我你要在哪个城市或地区搜索地点。");
         }
         if (result.intent() == IntentType.PLACE_SEARCH && result.slot("keyword").isBlank()) {
             return clarification(result, "你想搜索景点、餐厅、医院，还是其他地点？");
+        }
+        if (result.intent() == IntentType.PLACE_SEARCH
+                && (!isExplicitLocationInCurrentMessage(userMessage, result.slot("location"))
+                || !isPlausiblePlaceLocation(result.slot("location"))
+                || !isPlausiblePlaceKeyword(result.slot("keyword")))) {
+            return IntentResult.of(IntentType.CHAT, Math.max(0.8, result.confidence()));
+        }
+        if (result.intent() == IntentType.WEB_SEARCH && result.slot("query").isBlank()) {
+            return clarification(result, "请告诉我要联网搜索什么内容。");
+        }
+        if (result.intent() == IntentType.WORLD_CLOCK && result.slot("location").isBlank()) {
+            return new IntentResult(
+                    IntentType.WORLD_CLOCK, result.confidence(), Map.of("location", "北京"),
+                    result.replyMode(), false, ""
+            );
+        }
+        if (result.intent() == IntentType.TRIP_PLAN) {
+            IntentResult normalized = IntentResult.tripPlan(
+                    result.confidence(),
+                    result.slot("origin"),
+                    result.slot("destination"),
+                    result.slot("departure_time"),
+                    result.slot("duration")
+            );
+            result = new IntentResult(
+                    normalized.intent(), normalized.confidence(), normalized.slots(), result.replyMode(), false, ""
+            );
         }
         if (result.intent() == IntentType.GENERATE_IMAGE && result.slot("prompt").isBlank()) {
             return clarification(result, "你希望我生成一张什么样的图片？");
@@ -265,6 +407,15 @@ public class HybridIntentClassifier implements IntentClassifier {
         return result;
     }
 
+    private boolean isExplicitHelpRequest(String message) {
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+        String normalized = message.trim();
+        return HELP_COMMANDS.contains(normalized.toLowerCase(Locale.ROOT))
+                || EXPLICIT_HELP_PATTERN.matcher(normalized).matches();
+    }
+
     private String normalizeWeatherDate(String dateExpression) {
         if (dateExpression == null || dateExpression.isBlank()) {
             return "TODAY";
@@ -272,10 +423,51 @@ public class HybridIntentClassifier implements IntentClassifier {
         return switch (dateExpression) {
             case "明天" -> "TOMORROW";
             case "后天" -> "DAY_AFTER_TOMORROW";
-            case "未来三天", "未来3天" -> "NEXT_3_DAYS";
-            case "未来七天", "未来7天", "本周", "这周" -> "NEXT_7_DAYS";
+            case "未来几天", "最近几天", "近几天", "未来三天", "未来3天", "最近三天", "最近3天", "近三天", "近3天" -> "NEXT_3_DAYS";
+            case "未来七天", "未来7天", "最近七天", "最近7天", "近七天", "近7天", "本周", "这周" -> "NEXT_7_DAYS";
             default -> "TODAY";
         };
+    }
+
+    private boolean isWeatherDateExpression(String value) {
+        if (value == null) {
+            return false;
+        }
+        return Set.of(
+                "今天", "明天", "后天", "未来几天", "最近几天", "近几天",
+                "未来三天", "未来3天", "最近三天", "最近3天", "近三天", "近3天",
+                "未来七天", "未来7天", "最近七天", "最近7天", "近七天", "近7天", "本周", "这周"
+        ).contains(value.trim());
+    }
+
+    private boolean isExplicitLocationInCurrentMessage(String message, String location) {
+        if (message == null || location == null || location.isBlank() || isWeatherDateExpression(location)) {
+            return false;
+        }
+        String normalizedMessage = message.replaceAll("\\s+", "");
+        String normalizedLocation = location.replaceAll("\\s+", "")
+                .replaceFirst("(?:特别行政区|自治区|自治州|省|市|区|县)$", "");
+        return !normalizedLocation.isBlank() && normalizedMessage.contains(normalizedLocation);
+    }
+
+    private boolean isPlausiblePlaceLocation(String value) {
+        if (value == null || value.isBlank() || value.length() > 30) {
+            return false;
+        }
+        String normalized = value.trim();
+        return !normalized.matches(".*[，,。；;！!？?].*")
+                && !normalized.matches(".*(?:有没有|有没|哪里|什么|哪些|近点|附近|回来|睡觉|"
+                + "今天|明天|晚上|现在|可以|想去|出去).*");
+    }
+
+    private boolean isPlausiblePlaceKeyword(String value) {
+        if (value == null || value.isBlank() || value.length() > 40) {
+            return false;
+        }
+        String normalized = value.trim();
+        return !normalized.matches(".*[，,。；;！!？?].*")
+                && !normalized.matches(".*(?:有没有|有没|回来|睡觉|今天|明天|晚上|现在|"
+                + "近点|近一点|可以去哪里).*");
     }
 
     private IntentResult clarification(IntentResult source, String question) {

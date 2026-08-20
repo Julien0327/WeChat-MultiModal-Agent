@@ -11,6 +11,8 @@ import com.group4.wxai.service.llm.LlmService;
 import com.group4.wxai.service.tool.PlaceSearchTool;
 import com.group4.wxai.service.tool.ToolRegistry;
 import com.group4.wxai.service.tool.WeatherTool;
+import com.group4.wxai.service.tool.WebSearchTool;
+import com.group4.wxai.service.tool.WorldClockTool;
 import com.group4.wxai.service.wx.WxMessageService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,6 +47,9 @@ class TextProcessingServiceTests {
 
     @Mock
     private ToolRegistry toolRegistry;
+
+    @Mock
+    private TripPlanningService tripPlanningService;
 
     @Mock
     private WxMessageService wxMessageService;
@@ -87,6 +92,73 @@ class TextProcessingServiceTests {
     }
 
     @Test
+    void inheritsLastLocationForDateOnlyWeatherFollowUp() {
+        ChatContext.rememberLocation(USER_ID, "江油");
+        when(intentClassifier.classify(eq("那最近七天呢"), anyList()))
+                .thenReturn(IntentResult.of(IntentType.CHAT, 0.9));
+        when(toolRegistry.execute(WeatherTool.NAME, Map.of(
+                "location", "江油", "date", "NEXT_7_DAYS"
+        ))).thenReturn("江油未来七天天气");
+
+        textProcessingService.processAsync(USER_ID, "那最近七天呢");
+
+        verify(toolRegistry).execute(WeatherTool.NAME, Map.of(
+                "location", "江油", "date", "NEXT_7_DAYS"
+        ));
+        verify(intentClassifier).classify(eq("那最近七天呢"), anyList());
+        verify(wxMessageService).sendTextMessage(USER_ID, "江油未来七天天气");
+    }
+
+    @Test
+    void asksForWeatherLocationWithoutCallingTheTool() {
+        IntentResult missingLocation = IntentResult.weather(0.99, "", "TODAY");
+        when(intentClassifier.classify(eq("今天天气怎么样"), anyList())).thenReturn(missingLocation);
+
+        textProcessingService.processAsync(USER_ID, "今天天气怎么样");
+
+        verify(toolRegistry, never()).execute(eq(WeatherTool.NAME), org.mockito.ArgumentMatchers.anyMap());
+        verify(wxMessageService).sendTextMessage(
+                USER_ID, "你要查哪个城市或地区的天气？请告诉我具体地点。"
+        );
+        assertEquals("TODAY", ChatContext.getPendingWeatherDate(USER_ID).orElseThrow());
+        assertEquals(2, ChatContext.getHistory(USER_ID).size());
+    }
+
+    @Test
+    void fillsPendingWeatherLocationFromTheNextMessageAndKeepsRequestedDate() {
+        ChatContext.rememberPendingWeather(USER_ID, "TOMORROW");
+        when(intentClassifier.classify(eq("江油"), anyList()))
+                .thenReturn(IntentResult.of(IntentType.CHAT, 0.9));
+        when(toolRegistry.execute(WeatherTool.NAME, Map.of(
+                "location", "江油", "date", "TOMORROW"
+        ))).thenReturn("江油明天天气");
+
+        textProcessingService.processAsync(USER_ID, "江油");
+
+        verify(toolRegistry).execute(WeatherTool.NAME, Map.of(
+                "location", "江油", "date", "TOMORROW"
+        ));
+        verify(wxMessageService).sendTextMessage(USER_ID, "江油明天天气");
+        assertTrue(ChatContext.getPendingWeatherDate(USER_ID).isEmpty());
+    }
+
+    @Test
+    void letsTripPlanningConsumeDepartureDateBeforeWeatherFollowUp() {
+        ChatContext.rememberLocation(USER_ID, "耀州区");
+        IntentResult chat = IntentResult.of(IntentType.CHAT, 0.9);
+        when(intentClassifier.classify(eq("明天"), anyList())).thenReturn(chat);
+        when(tripPlanningService.shouldHandlePendingAnswer(USER_ID, "明天", chat)).thenReturn(true);
+        when(tripPlanningService.handleTurn(USER_ID, "明天", chat))
+                .thenReturn(new TripPlanningService.TripPlanTurn("这次准备玩多久？", false));
+
+        textProcessingService.processAsync(USER_ID, "明天");
+
+        verify(tripPlanningService).handleTurn(USER_ID, "明天", chat);
+        verify(toolRegistry, never()).execute(eq(WeatherTool.NAME), org.mockito.ArgumentMatchers.anyMap());
+        verify(wxMessageService).sendTextMessage(USER_ID, "这次准备玩多久？");
+    }
+
+    @Test
     void routesPlaceSearchIntentToRegisteredTool() {
         IntentResult placeIntent = IntentResult.placeSearch(0.98, "绵阳", "景点");
         when(intentClassifier.classify(eq("绵阳有哪些景点"), anyList())).thenReturn(placeIntent);
@@ -100,6 +172,55 @@ class TextProcessingServiceTests {
         );
         verify(wxMessageService).sendTextMessage(USER_ID, "📍 绵阳 · 景点\n1. 越王楼");
         verify(llmService, never()).chatText(eq(USER_ID), eq("绵阳有哪些景点"), anyList());
+        assertEquals(2, ChatContext.getHistory(USER_ID).size());
+    }
+
+    @Test
+    void routesWebSearchIntentToRegisteredTool() {
+        IntentResult searchIntent = IntentResult.webSearch(0.99, "千问最新消息");
+        when(intentClassifier.classify(eq("联网搜索千问最新消息"), anyList())).thenReturn(searchIntent);
+        when(toolRegistry.execute(WebSearchTool.NAME, Map.of("query", "千问最新消息")))
+                .thenReturn("🔎 联网搜索：千问最新消息\n来源：官方消息");
+
+        textProcessingService.processAsync(USER_ID, "联网搜索千问最新消息");
+
+        verify(toolRegistry).execute(WebSearchTool.NAME, Map.of("query", "千问最新消息"));
+        verify(wxMessageService).sendTextMessage(
+                USER_ID, "🔎 联网搜索：千问最新消息\n来源：官方消息"
+        );
+    }
+
+    @Test
+    void routesWorldClockIntentToRegisteredTool() {
+        IntentResult clockIntent = IntentResult.worldClock(1, "伦敦");
+        when(intentClassifier.classify(eq("伦敦现在几点"), anyList())).thenReturn(clockIntent);
+        when(toolRegistry.execute(WorldClockTool.NAME, Map.of("location", "伦敦")))
+                .thenReturn("🕒 伦敦时间\n当地时间：2026年8月20日 09:00:00");
+
+        textProcessingService.processAsync(USER_ID, "伦敦现在几点");
+
+        verify(toolRegistry).execute(WorldClockTool.NAME, Map.of("location", "伦敦"));
+        verify(wxMessageService).sendTextMessage(
+                USER_ID, "🕒 伦敦时间\n当地时间：2026年8月20日 09:00:00"
+        );
+    }
+
+    @Test
+    void routesTripPlanningThroughTheGuardedConversationService() {
+        IntentResult tripIntent = IntentResult.tripPlan(0.99, "江油", "", "明天", "1天");
+        when(intentClassifier.classify(eq("帮我规划明天从江油出发的一日游"), anyList()))
+                .thenReturn(tripIntent);
+        when(tripPlanningService.handleTurn(USER_ID, "帮我规划明天从江油出发的一日游", tripIntent))
+                .thenReturn(new TripPlanningService.TripPlanTurn(
+                        "你想去哪里？请给我目的城市或地区；如果还没想好，可以直接说“帮我推荐”。", false
+                ));
+
+        textProcessingService.processAsync(USER_ID, "帮我规划明天从江油出发的一日游");
+
+        verify(tripPlanningService).handleTurn(
+                USER_ID, "帮我规划明天从江油出发的一日游", tripIntent
+        );
+        verify(toolRegistry, never()).execute(eq("trip_plan"), org.mockito.ArgumentMatchers.anyMap());
         assertEquals(2, ChatContext.getHistory(USER_ID).size());
     }
 
@@ -140,10 +261,12 @@ class TextProcessingServiceTests {
         when(llmService.chatText(eq(USER_ID), eq("请用语音回答"), anyList())).thenReturn("语音答案");
         when(llmService.textToSpeech("语音答案")).thenReturn(audio);
         when(wxMessageService.sendVoiceMessage(USER_ID, audio)).thenReturn(true);
+        when(wxMessageService.sendMp3DownloadLink(USER_ID, audio)).thenReturn(true);
 
         textProcessingService.processAsync(USER_ID, "请用语音回答");
 
         verify(wxMessageService).sendVoiceMessage(USER_ID, audio);
+        verify(wxMessageService).sendMp3DownloadLink(USER_ID, audio);
         verify(wxMessageService, never()).sendTextMessage(USER_ID, "语音答案");
     }
 
@@ -157,10 +280,29 @@ class TextProcessingServiceTests {
         when(llmService.chatText(eq(USER_ID), eq("语音回复我"), anyList())).thenReturn("备用文字答案");
         when(llmService.textToSpeech("备用文字答案")).thenReturn(audio);
         when(wxMessageService.sendVoiceMessage(USER_ID, audio)).thenReturn(false);
+        when(wxMessageService.sendMp3DownloadLink(USER_ID, audio)).thenReturn(false);
 
         textProcessingService.processAsync(USER_ID, "语音回复我");
 
         verify(wxMessageService).sendTextMessage(USER_ID, "备用文字答案");
+    }
+
+    @Test
+    void keepsMp3ReplyWhenWechatVoiceBubbleCannotBeSent() {
+        IntentResult voiceChat = new IntentResult(
+                IntentType.CHAT, 0.98, Map.of(), ReplyMode.VOICE, false, ""
+        );
+        SynthesizedAudio audio = new SynthesizedAudio(new byte[]{5, 6}, "mp3");
+        when(intentClassifier.classify(eq("发语音给我"), anyList())).thenReturn(voiceChat);
+        when(llmService.chatText(eq(USER_ID), eq("发语音给我"), anyList())).thenReturn("MP3答案");
+        when(llmService.textToSpeech("MP3答案")).thenReturn(audio);
+        when(wxMessageService.sendVoiceMessage(USER_ID, audio)).thenReturn(false);
+        when(wxMessageService.sendMp3DownloadLink(USER_ID, audio)).thenReturn(true);
+
+        textProcessingService.processAsync(USER_ID, "发语音给我");
+
+        verify(wxMessageService).sendMp3DownloadLink(USER_ID, audio);
+        verify(wxMessageService, never()).sendTextMessage(USER_ID, "MP3答案");
     }
 
     @Test
