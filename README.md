@@ -1,29 +1,60 @@
-# group-4 微信智能客服
+# group-4 微信 iLink 智能助手
 
-基于 Spring Boot、WxJava 和阿里云 DashScope 的微信公众号智能客服，支持文本对话、图片理解、文生图和语音对话。
+基于 Spring Boot、微信 iLink SDK 和阿里云 DashScope 的微信智能助手，支持扫码登录、文本对话、图片理解、文生图、语音识别和多工具调用。原微信公众号回调入口暂时保留用于兼容，iLink 是新的主要消息通道。
 
 ## 本地配置
 
-项目不会把公众号密钥或 DashScope API Key 写进源码。先复制配置模板：
+项目不会把 iLink 登录凭证或 DashScope API Key 写进源码。先复制配置模板：
 
 ```powershell
 Copy-Item .env.example .env
 notepad .env
 ```
 
-填写自己的公众号和 DashScope 配置后启动：
+至少填写 `DASHSCOPE_API_KEY`、`ILINK_ADMIN_TOKEN`，以及高德、Tavily 等所需配置后启动：
 
 ```powershell
 mvn spring-boot:run
 ```
 
-微信公众号回调地址为：
+## 微信 iLink 扫码登录
+
+应用启动后，使用管理 Token 生成登录二维码。PowerShell 示例：
+
+```powershell
+$headers = @{ "X-ILink-Admin-Token" = "你在 .env 中设置的 ILINK_ADMIN_TOKEN" }
+Invoke-WebRequest -Method Post `
+  -Uri "http://127.0.0.1:8080/ilink/admin/login.png" `
+  -Headers $headers `
+  -OutFile "ilink-login.png"
+```
+
+打开 `ilink-login.png` 并用微信扫码确认。登录成功后，凭证保存在 `data/ilink-session.json`，该目录已被 Git 忽略；不要上传或分享这个文件。查询状态：
+
+如果本地保存的登录态已经失效，在登录地址后加 `?force=true`，程序会清理旧会话并重新生成扫码二维码：
+
+```powershell
+Invoke-WebRequest -Method Post `
+  -Uri "http://127.0.0.1:8080/ilink/admin/login.png?force=true" `
+  -Headers $headers `
+  -OutFile "ilink-login.png"
+```
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8080/ilink/admin/status" -Headers $headers
+```
+
+iLink 使用长轮询接收消息，不需要在微信后台配置公网回调 URL。目标用户必须先向 Bot 发消息，SDK 获取最新 `contextToken` 后才能回复。
+
+## 兼容的公众号入口
+
+旧的微信公众号回调仍暂时保留：
 
 ```text
 http(s)://你的公网域名/wx/msg
 ```
 
-公众号后台填写的 Token 必须与 `.env` 中的 `WX_TOKEN` 完全一致。`.env` 已被 Git 忽略，请勿提交或发送给其他人。
+如果不再使用公众号，可将 `WX_*` 保持为占位值。`.env` 已被 Git 忽略，请勿提交或发送给其他人。
 
 ## 意图识别
 
@@ -31,7 +62,7 @@ http(s)://你的公网域名/wx/msg
 
 1. 帮助、清除上下文、明确的画图、天气和地点搜索命令优先在本地判断，不消耗模型调用。
 2. 模糊表达交给 `qwen-flash`，并结合最近 6 条对话返回结构化 JSON。
-3. 程序只接受 `CHAT`、`WEATHER`、`PLACE_SEARCH`、`GENERATE_IMAGE`、`CLEAR_CONTEXT`、`HELP`、`UNKNOWN` 七种意图。
+3. 程序支持 `CHAT`、`WEATHER`、`PLACE_SEARCH`、`WEB_SEARCH`、`WORLD_CLOCK`、`TRIP_PLAN`、`GENERATE_IMAGE`、`CLEAR_CONTEXT`、`HELP`、`UNKNOWN` 等意图。
 4. 动作置信度低于 `0.75`、工具参数缺失、图片提示词缺失或消息不明确时，不执行操作，而是追问用户。
 5. 意图模型不可用或 JSON 无法解析时，安全降级为普通聊天。
 
@@ -45,10 +76,13 @@ http(s)://你的公网域名/wx/msg
 
 ## AI 工具
 
-应用通过统一的 `AiTool` 接口和 `ToolRegistry` 注册、查找并执行工具。当前包含两个确定性工具，结果均由外部数据源返回，不让大模型自行编造：
+应用通过统一的 `AiTool` 接口和 `ToolRegistry` 注册、查找并执行工具。当前包含以下确定性工具，结果由外部数据源或程序计算返回：
 
 - `weather`：包装现有 `WeatherService`，查询实时天气和未来 7 天预报。
 - `place_search`：调用高德地点关键字搜索，在指定城市查询景点、餐厅、医院、学校等 POI。
+- `web_search`：使用 Tavily 联网搜索，并返回来源链接。
+- `world_clock`：根据 IANA 时区数据计算指定地点的当前时间。
+- `trip_plan`：在出发地、目的地、时间和时长齐全后组合天气、地点与搜索结果。
 
 ### 天气查询
 
@@ -82,7 +116,7 @@ AMAP_WEATHER_API_KEY=你的高德Web服务Key
 2. 使用 `qwen3-asr-flash` 在程序内转成文字。
 3. 将转写文字交给与文本消息相同的意图识别和功能路由。
 4. 只有程序内识别失败时，才使用微信提供的 `Recognition` 文字兜底。
-5. 默认发送文字回答；用户明确要求语音回答时，使用 `cosyvoice-v3-flash` 合成为 MP3 并发送微信语音消息。
+5. 默认发送文字回答；用户明确要求语音回答时，使用 `cosyvoice-v3-flash` 合成为 MP3。iLink 通道把它作为音频文件发送，并可同时发送短时下载链接。
 
 程序内语音识别和语音合成与其他 DashScope 模型共用 `DASHSCOPE_API_KEY`，不需要第二个 API Key。
 

@@ -80,11 +80,20 @@ public record IntentResult(
 
     public static IntentResult tripPlan(double confidence, String origin, String destination,
                                         String departureTime, String duration) {
-        TripPlanRequest request = new TripPlanRequest(origin, destination, departureTime, duration);
+        return tripPlan(confidence, origin, destination, departureTime, duration, "");
+    }
+
+    public static IntentResult tripPlan(double confidence, String origin, String destination,
+                                        String departureTime, String duration, String preference) {
+        TripPlanRequest request = new TripPlanRequest(
+                origin, destination, departureTime, duration, preference
+        );
+        Map<String, String> slots = new LinkedHashMap<>(request.toArguments());
+        slots.putIfAbsent("preference", request.preference());
         return new IntentResult(
                 IntentType.TRIP_PLAN,
                 confidence,
-                request.toArguments(),
+                slots,
                 ReplyMode.AUTO,
                 false,
                 ""

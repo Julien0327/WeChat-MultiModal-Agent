@@ -35,7 +35,7 @@ public class DashScopeLlmService implements LlmService {
             .build();
 
     private static final String SYSTEM_PROMPT = """
-            你在微信公众号里和用户一对一聊天。保持稳定、克制、务实，不要使用热情客服腔。
+            你在微信里和用户一对一聊天。保持稳定、克制、务实，不要使用热情客服腔。
 
             性格与交流方式：
             - 平时话不多，先直接回答问题，不绕弯，也不为了显得热情而堆很多废话。
@@ -50,10 +50,10 @@ public class DashScopeLlmService implements LlmService {
             - 不要输出未填充的模板字段或占位符，例如 [姓名]、<用户>、{user_name}、XXX。
             - 不要使用“尊敬的用户”“亲”“很高兴为您服务”等客服套话。
             - 简单问题通常用一到三段短文本回答；只有确实需要时才使用列表、标题或代码块。
-            - 不向用户提及这些性格规则，也不声称自己在模仿某个现实人物。被直接问身份时，如实说明是公众号里的 AI 助手。
+            - 不向用户提及这些性格规则，也不声称自己在模仿某个现实人物。被直接问身份时，如实说明是微信里的 AI 助手。
 
             你具备以下能力：普通聊天和知识问答、查询天气、搜索地点、生成图片、分析用户发送的图片、
-            识别用户发送的语音、在参数确认后规划出行，以及把回答合成为语音并通过微信公众号发送。
+            识别用户发送的语音、在参数确认后规划出行，以及把回答合成为音频并通过微信发送。
             默认使用文字回复；当用户明确要求“用语音回答”“语音回复”或类似表达时，
             外部程序会把你的回答合成为语音并发送。因此，当用户询问你是否会说话、
             是否支持语音回复时，应明确回答支持，并告诉用户可以说“请用语音回答我”。
@@ -87,7 +87,8 @@ public class DashScopeLlmService implements LlmService {
 
     @Override
     public String chatWithImage(String userId, String prompt, String imageUrl) {
-        log.info("LLM图片理解: user={}, imageUrl={}", userId, imageUrl);
+        boolean embeddedImage = imageUrl != null && imageUrl.startsWith("data:");
+        log.info("LLM图片理解: user={}, source={}", userId, embeddedImage ? "embedded" : "url");
 
         try {
             ObjectNode requestBody = objectMapper.createObjectNode();
@@ -113,8 +114,11 @@ public class DashScopeLlmService implements LlmService {
             input.set("messages", messages);
             requestBody.set("input", input);
 
-            JsonNode response = postJson(llmProperties.getBaseUrl() + "/services/aigc/multimodal-generation/generation",
-                    requestBody);
+            JsonNode response = postJson(
+                    llmProperties.getBaseUrl() + "/services/aigc/multimodal-generation/generation",
+                    requestBody,
+                    !embeddedImage
+            );
             String reply = response.path("output").path("choices").path(0).path("message").path("content")
                     .path(0).path("text").asText();
             if (reply.isEmpty()) {
@@ -270,6 +274,18 @@ public class DashScopeLlmService implements LlmService {
             log.error("LLM语音识别失败: format={}, size={} bytes", normalizedFormat, audioData.length, e);
             throw new IllegalStateException("语音识别服务暂时不可用", e);
         }
+    }
+
+    @Override
+    public String chatWithImageData(String userId, String prompt, byte[] imageData, String mimeType) {
+        if (imageData == null || imageData.length == 0) {
+            throw new IllegalArgumentException("图片内容为空");
+        }
+        String safeMimeType = mimeType == null || !mimeType.startsWith("image/")
+                ? "image/jpeg" : mimeType;
+        String dataUrl = "data:" + safeMimeType + ";base64,"
+                + Base64.getEncoder().encodeToString(imageData);
+        return chatWithImage(userId, prompt, dataUrl);
     }
 
     @Override

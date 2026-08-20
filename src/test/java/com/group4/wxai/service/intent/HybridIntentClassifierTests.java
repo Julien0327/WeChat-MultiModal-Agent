@@ -144,7 +144,26 @@ class HybridIntentClassifierTests {
         assertEquals("", result.slot("destination"));
         assertEquals("明天", result.slot("departure_time"));
         assertEquals("1天", result.slot("duration"));
+        assertEquals("", result.slot("preference"));
         assertFalse(result.needsClarification());
+    }
+
+    @Test
+    void preservesTripPreferenceSeparatelyFromDestination() throws Exception {
+        stubModelResult("""
+                {"intent":"TRIP_PLAN","confidence":0.98,
+                 "slots":{"origin":"江油","destination":"RECOMMEND","departure_time":"明天",
+                 "duration":"7天","preference":"雪山"},
+                 "replyMode":"AUTO","needsClarification":false,"clarificationQuestion":""}
+                """);
+
+        IntentResult result = classifier.classify(
+                "明天从江油出发玩7天，想看雪山，帮我推荐", List.of()
+        );
+
+        assertEquals(IntentType.TRIP_PLAN, result.intent());
+        assertEquals("RECOMMEND", result.slot("destination"));
+        assertEquals("雪山", result.slot("preference"));
     }
 
     @Test

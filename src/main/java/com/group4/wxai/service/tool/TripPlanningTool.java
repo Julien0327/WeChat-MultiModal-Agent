@@ -23,7 +23,8 @@ public class TripPlanningTool implements AiTool {
                 "origin":{"type":"string","minLength":1,"description":"出发城市或地区，禁止猜测"},
                 "destination":{"type":"string","minLength":1,"description":"用户确认的目的城市或地区"},
                 "departure_time":{"type":"string","minLength":1,"description":"明确的出行日期和可选出发时刻"},
-                "duration":{"type":"string","minLength":1,"description":"出行时长，例如半天、1天、2天"}
+                "duration":{"type":"string","minLength":1,"description":"出行时长，例如半天、1天、2天"},
+                "preference":{"type":"string","description":"用户明确表达并在上下文中保留的偏好，例如海边、亲子、避暑、当天往返"}
               },
               "required":["origin","destination","departure_time","duration"],
               "additionalProperties":false
@@ -61,11 +62,12 @@ public class TripPlanningTool implements AiTool {
         ));
         String places = placeSearchTool.execute(Map.of(
                 "location", request.destination(),
-                "keyword", "旅游景点"
+                "keyword", preferenceKeyword(request.preference())
         ));
         String web = webSearchTool.execute(Map.of(
                 "query", request.destination() + " " + request.departureTime() + " "
                         + request.duration() + " 旅行攻略 营业时间 预约 最新"
+                        + (request.preference().isBlank() ? "" : " 偏好：" + request.preference())
         ));
 
         return llmService.chatText("trip-plan-tool", buildPlanningPrompt(request, weather, places, web), List.of());
@@ -83,6 +85,26 @@ public class TripPlanningTool implements AiTool {
         validateText(request.destination(), "目的地", 60);
         validateText(request.departureTime(), "出行时间", 80);
         validateText(request.duration(), "出行时长", 30);
+        validateText(request.preference(), "出行偏好", 120);
+    }
+
+    private String preferenceKeyword(String preference) {
+        if (preference.contains("海边/沿海")) {
+            return "海边景点";
+        }
+        if (preference.contains("雪山")) {
+            return "雪山景点";
+        }
+        if (preference.contains("亲子")) {
+            return "亲子景点";
+        }
+        if (preference.contains("美食")) {
+            return "特色美食";
+        }
+        if (preference.contains("人文历史")) {
+            return "人文古迹";
+        }
+        return "旅游景点";
     }
 
     private void validateText(String value, String label, int maxLength) {
@@ -120,6 +142,7 @@ public class TripPlanningTool implements AiTool {
                 目的地：%s
                 出行时间：%s
                 出行时长：%s
+                出行偏好：%s
 
                 天气资料：
                 %s
@@ -131,6 +154,7 @@ public class TripPlanningTool implements AiTool {
                 %s
                 """.formatted(
                 request.origin(), request.destination(), request.departureTime(), request.duration(),
+                request.preference().isBlank() ? "无" : request.preference(),
                 weather, places, web
         );
     }

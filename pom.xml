@@ -36,6 +36,24 @@
             <version>${weixin-java.version}</version>
         </dependency>
 
+        <!-- 微信 iLink Bot SDK：扫码登录个人微信通道并收发消息 -->
+        <dependency>
+            <groupId>io.github.lith0924</groupId>
+            <artifactId>wechat-ilink-sdk</artifactId>
+            <version>2.3.3</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.google.zxing</groupId>
+            <artifactId>core</artifactId>
+            <version>3.5.3</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.zxing</groupId>
+            <artifactId>javase</artifactId>
+            <version>3.5.3</version>
+        </dependency>
+
         <!-- OkHttp (调用 LLM API) -->
         <dependency>
             <groupId>com.squareup.okhttp3</groupId>

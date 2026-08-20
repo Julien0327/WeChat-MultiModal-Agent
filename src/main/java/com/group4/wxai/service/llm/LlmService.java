@@ -11,6 +11,8 @@ public interface LlmService {
 
     String chatWithImage(String userId, String prompt, String imageUrl);
 
+    String chatWithImageData(String userId, String prompt, byte[] imageData, String mimeType);
+
     String generateImage(String prompt);
 
     String speechToText(byte[] audioData, String audioFormat);

@@ -2,6 +2,7 @@ package com.group4.wxai.service.wx;
 
 import com.group4.wxai.model.SynthesizedAudio;
 import com.group4.wxai.service.audio.AudioDownloadService;
+import com.group4.wxai.service.ilink.ILinkClientManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import me.chanjar.weixin.mp.api.WxMpService;
@@ -16,9 +17,15 @@ public class WxMessageService {
     private final WxMpService wxMpService;
     private final WxMediaService wxMediaService;
     private final AudioDownloadService audioDownloadService;
+    private final ILinkClientManager iLinkClientManager;
 
     public void sendTextMessage(String openid, String content) {
         try {
+            if (iLinkClientManager.isILinkUser(openid)) {
+                iLinkClientManager.sendText(openid, content);
+                log.info("iLink 文本消息发送成功: to={}", openid);
+                return;
+            }
             WxMpKefuMessage message = WxMpKefuMessage.TEXT()
                     .toUser(openid)
                     .content(content)
@@ -32,6 +39,12 @@ public class WxMessageService {
 
     public void sendImageMessage(String openid, String imageUrl) {
         try {
+            if (iLinkClientManager.isILinkUser(openid)) {
+                byte[] imageData = wxMediaService.downloadFromUrl(imageUrl);
+                iLinkClientManager.sendImage(openid, imageData, "generated-image.jpg", "");
+                log.info("iLink 图片消息发送成功: to={}", openid);
+                return;
+            }
             String mediaId = wxMediaService.uploadImageFromUrl(imageUrl);
             WxMpKefuMessage message = WxMpKefuMessage.IMAGE()
                     .toUser(openid)
@@ -50,6 +63,12 @@ public class WxMessageService {
             if (audio == null || audio.isEmpty()) {
                 return false;
             }
+            if (iLinkClientManager.isILinkUser(openid)) {
+                String format = audio.format().isBlank() ? "mp3" : audio.format();
+                iLinkClientManager.sendFile(openid, audio.data(), "语音回复." + format, "语音回复 MP3");
+                log.info("iLink 音频文件发送成功: to={}, format={}", openid, format);
+                return true;
+            }
             String mediaId = wxMediaService.uploadVoice(audio.data(), audio.format());
             WxMpKefuMessage message = WxMpKefuMessage.VOICE()
                     .toUser(openid)
@@ -66,8 +85,20 @@ public class WxMessageService {
 
     public boolean sendMp3DownloadLink(String openid, SynthesizedAudio audio) {
         return audioDownloadService.publishMp3(audio)
-                .map(url -> sendTextMessageSafely(openid, "MP3 文件（30 分钟内有效）：\n" + url))
+                .map(url -> iLinkClientManager.isILinkUser(openid)
+                        ? sendILinkTextSafely(openid, "MP3 文件（30 分钟内有效）：\n" + url)
+                        : sendTextMessageSafely(openid, "MP3 文件（30 分钟内有效）：\n" + url))
                 .orElse(false);
+    }
+
+    private boolean sendILinkTextSafely(String userId, String content) {
+        try {
+            iLinkClientManager.sendText(userId, content);
+            return true;
+        } catch (Exception e) {
+            log.error("发送 iLink MP3 下载链接失败: to={}", userId, e);
+            return false;
+        }
     }
 
     private boolean sendTextMessageSafely(String openid, String content) {

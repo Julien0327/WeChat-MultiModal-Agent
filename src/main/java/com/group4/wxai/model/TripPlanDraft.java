@@ -10,7 +10,8 @@ public record TripPlanDraft(
         String origin,
         String destination,
         String departureTime,
-        String duration
+        String duration,
+        String preference
 ) {
 
     public TripPlanDraft {
@@ -18,10 +19,15 @@ public record TripPlanDraft(
         destination = clean(destination);
         departureTime = clean(departureTime);
         duration = clean(duration);
+        preference = clean(preference);
+    }
+
+    public TripPlanDraft(String origin, String destination, String departureTime, String duration) {
+        this(origin, destination, departureTime, duration, "");
     }
 
     public static TripPlanDraft empty() {
-        return new TripPlanDraft("", "", "", "");
+        return new TripPlanDraft("", "", "", "", "");
     }
 
     public TripPlanDraft merge(Map<String, String> slots) {
@@ -30,22 +36,24 @@ public record TripPlanDraft(
                 prefer(safeSlots.get("origin"), origin),
                 prefer(safeSlots.get("destination"), destination),
                 prefer(safeSlots.get("departure_time"), departureTime),
-                prefer(safeSlots.get("duration"), duration)
+                prefer(safeSlots.get("duration"), duration),
+                prefer(safeSlots.get("preference"), preference)
         );
     }
 
     public TripPlanDraft with(String field, String value) {
         return switch (field) {
-            case "origin" -> new TripPlanDraft(value, destination, departureTime, duration);
-            case "destination" -> new TripPlanDraft(origin, value, departureTime, duration);
-            case "departure_time" -> new TripPlanDraft(origin, destination, value, duration);
-            case "duration" -> new TripPlanDraft(origin, destination, departureTime, value);
+            case "origin" -> new TripPlanDraft(value, destination, departureTime, duration, preference);
+            case "destination" -> new TripPlanDraft(origin, value, departureTime, duration, preference);
+            case "departure_time" -> new TripPlanDraft(origin, destination, value, duration, preference);
+            case "duration" -> new TripPlanDraft(origin, destination, departureTime, value, preference);
+            case "preference" -> new TripPlanDraft(origin, destination, departureTime, duration, value);
             default -> this;
         };
     }
 
     public TripPlanRequest toRequest() {
-        return new TripPlanRequest(origin, destination, departureTime, duration);
+        return new TripPlanRequest(origin, destination, departureTime, duration, preference);
     }
 
     public Map<String, String> toSlots() {
@@ -54,6 +62,9 @@ public record TripPlanDraft(
         slots.put("destination", destination);
         slots.put("departure_time", departureTime);
         slots.put("duration", duration);
+        if (!preference.isBlank()) {
+            slots.put("preference", preference);
+        }
         return slots;
     }
 

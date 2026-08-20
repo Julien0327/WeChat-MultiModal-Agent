@@ -53,6 +53,7 @@ class TripPlanningToolTests {
         assertTrue(schema.path("properties").has("origin"));
         assertTrue(schema.path("properties").has("departure_time"));
         assertTrue(schema.path("properties").has("duration"));
+        assertTrue(schema.path("properties").has("preference"));
     }
 
     @Test
@@ -96,5 +97,29 @@ class TripPlanningToolTests {
                 "query", "成都 2026-08-22 08:00 1天 旅行攻略 营业时间 预约 最新"
         ));
         order.verify(llmService).chatText(eq("trip-plan-tool"), anyString(), eq(List.of()));
+    }
+
+    @Test
+    void appliesConfirmedPreferenceToPlaceAndWebSearch() {
+        Map<String, String> arguments = Map.of(
+                "origin", "江油",
+                "destination", "青岛",
+                "departure_time", "2026-08-22",
+                "duration", "7天",
+                "preference", "海边/沿海"
+        );
+        when(weatherTool.execute(Map.of("location", "青岛", "date", "2026-08-22")))
+                .thenReturn("青岛天气资料");
+        when(placeSearchTool.execute(Map.of("location", "青岛", "keyword", "海边景点")))
+                .thenReturn("青岛海边地点");
+        when(webSearchTool.execute(Map.of(
+                "query", "青岛 2026-08-22 7天 旅行攻略 营业时间 预约 最新 偏好：海边/沿海"
+        ))).thenReturn("青岛联网资料");
+        when(llmService.chatText(eq("trip-plan-tool"), anyString(), eq(List.of())))
+                .thenReturn("青岛沿海七日行程");
+
+        String result = tool.execute(arguments);
+
+        assertEquals("青岛沿海七日行程", result);
     }
 }

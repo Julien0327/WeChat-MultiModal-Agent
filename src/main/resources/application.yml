@@ -8,6 +8,14 @@ wx:
     token: ${WX_TOKEN:your-token}
     aes-key: ${WX_AES_KEY:your-aes-key}
 
+ilink:
+  enabled: ${ILINK_ENABLED:true}
+  admin-token: ${ILINK_ADMIN_TOKEN:}
+  session-file: ${ILINK_SESSION_FILE:data/ilink-session.json}
+  poll-error-backoff: ${ILINK_POLL_ERROR_BACKOFF:3s}
+  login-timeout: ${ILINK_LOGIN_TIMEOUT:3m}
+  channel-version: ${ILINK_CHANNEL_VERSION:1.0.0}
+
 llm:
   provider: dashscope
   dashscope:

@@ -20,8 +20,10 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.TemporalAdjusters;
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -48,13 +50,14 @@ public class TripPlanningService {
             ".*(?:[？?]|吗|呢|天气|几点|时间|为什么|怎么|如何|搜索|查询|查一下|画|图片|生成|语音|聊天).*"
     );
     private static final Pattern RECOMMEND_DESTINATION = Pattern.compile(
-            ".*(?:没想好|还没想好|不知道去哪|不知道去哪里|帮我推荐|你推荐|推荐一个|推荐目的地).*"
+            ".*(?:没想好|还没想好|不知道去哪|不知道去哪里|帮我推荐|你推荐|推荐一个|推荐目的地|"
+                    + "可以去哪里|去哪玩|去哪里玩|想出去玩).*"
     );
     private static final Pattern CANCEL = Pattern.compile(
             "^(?:算了|不用了|取消|不规划了|先不规划了|停止规划)[。！! ]*$"
     );
     private static final Pattern ORIGIN_IN_TEXT = Pattern.compile(
-            "(?:^|[，,。；;！!？?\\s])(?:我)?(?:现在)?(?:在|从)"
+            "(?:我)?(?:现在)?(?:在|从)"
                     + "([^，,。；;！!？?]{2,30}?)(?=(?:就)?(?:现在|今天|明天|后天|马上|立刻)?"
                     + "(?:出发|走|动身)|[，,。；;！!？?]|$)"
     );
@@ -65,7 +68,28 @@ public class TripPlanningService {
             ".*(?:近点|近一点|附近|周边|太远|远了|当天回来|当晚回来|晚上回来|回来睡觉|"
                     + "不住宿|不住店|往返|来回).*"
     );
+    private static final List<PreferenceRule> PREFERENCE_RULES = List.of(
+            new PreferenceRule(Pattern.compile(".*(?:海边|沿海|看海|沙滩|海岛|海滨).*"), "海边/沿海"),
+            new PreferenceRule(Pattern.compile(".*(?:雪山|冰川|看雪|赏雪).*"), "雪山"),
+            new PreferenceRule(Pattern.compile(".*(?:远点|远一点|远一些|远一点儿|去远处|可以去远).*"), "可以远途"),
+            new PreferenceRule(Pattern.compile(".*(?:近点|近一点|近一些|附近|周边).*"), "距离较近"),
+            new PreferenceRule(Pattern.compile(".*(?:当天回来|当晚回来|晚上回来|当天往返|来回|往返).*"), "当天往返"),
+            new PreferenceRule(Pattern.compile(".*(?:不住宿|不住店|不住酒店|回来睡觉).*"), "不住宿"),
+            new PreferenceRule(Pattern.compile(".*(?:亲子|带孩子|带小孩|小朋友).*"), "亲子"),
+            new PreferenceRule(Pattern.compile(".*(?:老人|父母|长辈).*"), "适合老人"),
+            new PreferenceRule(Pattern.compile(".*(?:避暑|凉快|清凉).*"), "避暑"),
+            new PreferenceRule(Pattern.compile(".*(?:美食|好吃|吃东西|小吃).*"), "美食"),
+            new PreferenceRule(Pattern.compile(".*(?:古镇|古城|历史|人文|博物馆).*"), "人文历史"),
+            new PreferenceRule(Pattern.compile(".*(?:自然风景|山水|森林|草原|爬山).*"), "自然风景"),
+            new PreferenceRule(Pattern.compile(".*(?:轻松|少走路|不爬山|不要太累).*"), "轻松少走路"),
+            new PreferenceRule(Pattern.compile(".*(?:省钱|便宜|低预算|预算有限|性价比).*"), "预算友好"),
+            new PreferenceRule(Pattern.compile(".*(?:自驾|开车去).*"), "自驾")
+    );
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+    private static final Pattern GENERIC_DESTINATION_PREFERENCE = Pattern.compile(
+            "^(?:雪山|冰川|海边|沿海|海岛|沙滩|海滨|草原|森林|山里|山区|湖边|古镇|古城|"
+                    + "温泉|避暑|亲子|美食|自然风景|人文景点)$"
+    );
 
     private final PlaceSearchTool placeSearchTool;
     private final WebSearchTool webSearchTool;
@@ -104,6 +128,9 @@ public class TripPlanningService {
         if (RECOMMENDATION_REFINEMENT.matcher(message.trim()).matches()) {
             return true;
         }
+        if (!extractPreference(message).isBlank()) {
+            return true;
+        }
         if (isSafeDirectAnswer(draft.nextMissingField(), message)) {
             return true;
         }
@@ -123,25 +150,38 @@ public class TripPlanningService {
         boolean continuingDraft = drafts.containsKey(userId);
         TripPlanDraft draft = drafts.getOrDefault(userId, TripPlanDraft.empty());
         String awaitedField = draft.nextMissingField();
+        String messagePreference = extractPreference(normalizedMessage);
         if (intent != null && intent.intent() == IntentType.TRIP_PLAN) {
-            // On follow-up turns, only the user's raw message may fill or correct a slot.
-            // Model-generated slots are intentionally ignored so they cannot overwrite or invent state.
             if (!continuingDraft) {
-                draft = draft.merge(intent.slots());
+                draft = draft.merge(intent.slots()).with("preference", "");
+                draft = draft.with("destination", resolveDestinationAnswer(normalizedMessage, intent));
             }
         }
-        if (continuingDraft) {
-            draft = applyExplicitTripDetails(draft, normalizedMessage);
+        draft = applyExplicitTripDetails(draft, normalizedMessage);
+        String effectivePreference = mergePreference(
+                messagePreference, resolveModelPreference(normalizedMessage, intent)
+        );
+        effectivePreference = mergePreference(effectivePreference, destinationAsPreference(intent));
+        if (!effectivePreference.isBlank()) {
+            draft = draft.with("preference", mergePreference(draft.preference(), effectivePreference));
+        }
+        if (continuingDraft && "destination".equals(awaitedField)) {
+            String extractedDestination = resolveDestinationAnswer(normalizedMessage, intent);
+            if (!extractedDestination.isBlank()) {
+                draft = draft.with("destination", extractedDestination);
+            }
         }
         if (continuingDraft && "destination".equals(awaitedField)
-                && RECOMMENDATION_REFINEMENT.matcher(normalizedMessage).matches()) {
+                && (RECOMMENDATION_REFINEMENT.matcher(normalizedMessage).matches()
+                || !effectivePreference.isBlank())) {
             draft = normalizeAndValidateDraft(draft);
             if (!draft.origin().isBlank() && !draft.departureTime().isBlank() && !draft.duration().isBlank()) {
-                return recommendDestination(userId, draft.with("destination", TripPlanRequest.RECOMMEND_DESTINATION),
-                        normalizedMessage);
+                return recommendDestination(userId,
+                        draft.with("destination", TripPlanRequest.RECOMMEND_DESTINATION));
             }
         }
-        if (continuingDraft && !awaitedField.isBlank() && isSafeDirectAnswer(awaitedField, normalizedMessage)) {
+        if (continuingDraft && !awaitedField.isBlank() && !"destination".equals(awaitedField)
+                && isSafeDirectAnswer(awaitedField, normalizedMessage)) {
             draft = applyDirectAnswer(draft, awaitedField, normalizedMessage);
         }
         draft = normalizeAndValidateDraft(draft);
@@ -153,7 +193,7 @@ public class TripPlanningService {
         }
 
         if (draft.toRequest().needsDestinationRecommendation()) {
-            return recommendDestination(userId, draft, "");
+            return recommendDestination(userId, draft);
         }
 
         String reply = toolRegistry.execute(TripPlanningTool.NAME, draft.toRequest().toArguments());
@@ -169,16 +209,17 @@ public class TripPlanningService {
         return Optional.ofNullable(drafts.get(userId));
     }
 
-    private TripPlanTurn recommendDestination(String userId, TripPlanDraft draft, String preference) {
+    private TripPlanTurn recommendDestination(String userId, TripPlanDraft draft) {
         TripPlanRequest request = draft.toRequest();
+        String preference = draft.preference();
         String amapResults = placeSearchTool.execute(Map.of(
                 "location", request.origin(),
-                "keyword", "旅游景点"
+                "keyword", preferenceKeyword(preference)
         ));
         String webResults = webSearchTool.execute(Map.of(
                 "query", "从" + request.origin() + "出发 " + request.departureTime() + " "
-                        + request.duration() + " 周边游目的地推荐 最新攻略"
-                        + (preference == null || preference.isBlank() ? "" : " 要求：" + preference)
+                        + request.duration() + " " + recommendationScope(preference) + "目的地推荐 最新攻略"
+                        + (preference.isBlank() ? "" : " 偏好：" + preference)
         ));
         String prompt = """
                 用户还没有决定目的地。请只依据下面的高德和联网结果，给出 3 至 5 个候选目的地或景点，
@@ -197,12 +238,12 @@ public class TripPlanningService {
                 %s
                 """.formatted(
                 request.origin(), request.departureTime(), request.duration(),
-                preference == null || preference.isBlank() ? "无" : preference,
+                preference.isBlank() ? "无" : preference,
                 amapResults, webResults
         );
         String reply = llmService.chatText("trip-destination-recommendation", prompt, List.of());
         drafts.put(userId, new TripPlanDraft(
-                draft.origin(), "", draft.departureTime(), draft.duration()
+                draft.origin(), "", draft.departureTime(), draft.duration(), draft.preference()
         ));
         return new TripPlanTurn(reply, false);
     }
@@ -212,7 +253,76 @@ public class TripPlanningService {
         String destination = normalizeDestination(draft.destination());
         String departureTime = normalizeDepartureTime(draft.departureTime());
         String duration = normalizeDuration(draft.duration());
-        return new TripPlanDraft(origin, destination, departureTime, duration);
+        String preference = normalizePreference(draft.preference());
+        return new TripPlanDraft(origin, destination, departureTime, duration, preference);
+    }
+
+    private String extractPreference(String message) {
+        if (message == null || message.isBlank()) {
+            return "";
+        }
+        Set<String> preferences = new LinkedHashSet<>();
+        String normalized = message.trim();
+        for (PreferenceRule rule : PREFERENCE_RULES) {
+            if (rule.pattern().matcher(normalized).matches()) {
+                preferences.add(rule.label());
+            }
+        }
+        return String.join("、", preferences);
+    }
+
+    private String mergePreference(String existing, String incoming) {
+        Set<String> preferences = new LinkedHashSet<>();
+        addPreferences(preferences, normalizePreference(existing));
+        String normalizedIncoming = normalizePreference(incoming);
+        if (normalizedIncoming.contains("可以远途")) {
+            preferences.remove("距离较近");
+        } else if (normalizedIncoming.contains("距离较近")) {
+            preferences.remove("可以远途");
+        }
+        addPreferences(preferences, normalizedIncoming);
+        return String.join("、", preferences);
+    }
+
+    private void addPreferences(Set<String> preferences, String value) {
+        if (!value.isBlank()) {
+            for (String item : value.split("、")) {
+                if (!item.isBlank()) {
+                    preferences.add(item.trim());
+                }
+            }
+        }
+    }
+
+    private String normalizePreference(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String normalized = value.replaceAll("[\\r\\n\\t]", " ").trim();
+        return normalized.length() > 120 ? normalized.substring(0, 120) : normalized;
+    }
+
+    private String preferenceKeyword(String preference) {
+        if (preference.contains("海边/沿海")) {
+            return "海边景点";
+        }
+        if (preference.contains("雪山")) {
+            return "雪山景点";
+        }
+        if (preference.contains("亲子")) {
+            return "亲子景点";
+        }
+        if (preference.contains("美食")) {
+            return "特色美食";
+        }
+        if (preference.contains("人文历史")) {
+            return "人文古迹";
+        }
+        return "旅游景点";
+    }
+
+    private String recommendationScope(String preference) {
+        return preference.isBlank() || preference.contains("距离较近") ? "周边游" : "旅行";
     }
 
     private TripPlanDraft applyDirectAnswer(TripPlanDraft draft, String field, String message) {
@@ -288,7 +398,75 @@ public class TripPlanningService {
                 || RECOMMEND_DESTINATION.matcher(value.trim()).matches()) {
             return TripPlanRequest.RECOMMEND_DESTINATION;
         }
-        return normalizeLocation(value, "destination");
+        String destination = normalizeLocation(value, "destination");
+        return isCleanDestinationCandidate(destination) ? destination : "";
+    }
+
+    private String resolveDestinationAnswer(String message, IntentResult intent) {
+        String modelDestination = intent != null && intent.intent() == IntentType.TRIP_PLAN
+                ? normalizeDestination(intent.slot("destination")) : "";
+        if (TripPlanRequest.RECOMMEND_DESTINATION.equals(modelDestination)) {
+            return RECOMMEND_DESTINATION.matcher(message).matches() ? modelDestination : "";
+        }
+        if (!modelDestination.isBlank() && isExplicitlyPresent(modelDestination, message)) {
+            return modelDestination;
+        }
+
+        String bareAnswer = message == null ? "" : message.trim().replaceAll("[。！!]$", "");
+        if (bareAnswer.equals(normalizeDirectAnswer("destination", bareAnswer))
+                && isSafeLocation(bareAnswer) && isCleanDestinationCandidate(bareAnswer)) {
+            return bareAnswer;
+        }
+        return "";
+    }
+
+    private String resolveModelPreference(String message, IntentResult intent) {
+        if (intent == null || intent.intent() != IntentType.TRIP_PLAN) {
+            return "";
+        }
+        String preference = normalizePreference(intent.slot("preference"));
+        if (preference.isBlank()) {
+            return "";
+        }
+        String normalizedMessage = message == null ? "" : message.replaceAll("\\s+", "");
+        Set<String> accepted = new LinkedHashSet<>();
+        for (String item : preference.split("[、,，/]")) {
+            String normalizedItem = item.trim().replaceAll("\\s+", "");
+            if (!normalizedItem.isBlank() && normalizedMessage.contains(normalizedItem)) {
+                accepted.add(item.trim());
+            }
+        }
+        return String.join("、", accepted);
+    }
+
+    private String destinationAsPreference(IntentResult intent) {
+        if (intent == null || intent.intent() != IntentType.TRIP_PLAN) {
+            return "";
+        }
+        String destination = intent.slot("destination").trim();
+        return GENERIC_DESTINATION_PREFERENCE.matcher(destination).matches()
+                ? extractPreference(destination) : "";
+    }
+
+    private boolean isExplicitlyPresent(String destination, String message) {
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+        String normalizedMessage = message.replaceAll("\\s+", "");
+        String normalizedDestination = destination.replaceAll("\\s+", "");
+        if (normalizedMessage.contains(normalizedDestination)) {
+            return true;
+        }
+        String withoutAdministrativeSuffix = normalizedDestination.replaceFirst("(?:市|区|县)$", "");
+        return withoutAdministrativeSuffix.length() >= 2
+                && normalizedMessage.contains(withoutAdministrativeSuffix);
+    }
+
+    private boolean isCleanDestinationCandidate(String value) {
+        return value != null && !value.isBlank() && value.length() <= 40
+                && !GENERIC_DESTINATION_PREFERENCE.matcher(value).matches()
+                && !value.matches(".*(?:我去|我要|我想|想去|要去|打算|准备|帮我|推荐|"
+                + "吧|呀|呢|啊|旅游|旅行|游玩|可以去哪里).*" );
     }
 
     private String normalizeDepartureTime(String value) {
@@ -397,7 +575,7 @@ public class TripPlanningService {
                 || value.equals("随便") || value.equals("你猜")
                 || value.matches(".*[，,。；;！!？?].*")
                 || value.matches(".*(?:我在|我从|现在出发|想去|出去|游玩|玩一|回来|睡觉|"
-                + "有没有|有没|近点|近一点|可以去哪里).*")) {
+                + "我去|我要|要去|有没有|有没|近点|近一点|可以去哪里).*")) {
             return false;
         }
         return value.chars().noneMatch(Character::isISOControl);
@@ -414,5 +592,8 @@ public class TripPlanningService {
     }
 
     public record TripPlanTurn(String reply, boolean completed) {
+    }
+
+    private record PreferenceRule(Pattern pattern, String label) {
     }
 }

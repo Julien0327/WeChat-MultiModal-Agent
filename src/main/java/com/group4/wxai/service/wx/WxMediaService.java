@@ -24,12 +24,15 @@ public class WxMediaService {
 
     public String uploadImageFromUrl(String imageUrl) throws Exception {
         log.info("从URL下载图片: {}", imageUrl);
-        try (Response response = okHttpClient.newCall(new Request.Builder().url(imageUrl).build()).execute()) {
-            if (!response.isSuccessful()) {
-                throw new RuntimeException("下载图片失败: " + response.code());
+        return uploadImage(downloadFromUrl(imageUrl), "jpg");
+    }
+
+    public byte[] downloadFromUrl(String url) throws Exception {
+        try (Response response = okHttpClient.newCall(new Request.Builder().url(url).build()).execute()) {
+            if (!response.isSuccessful() || response.body() == null) {
+                throw new RuntimeException("下载媒体失败: " + response.code());
             }
-            byte[] imageData = response.body().bytes();
-            return uploadImage(imageData, "jpg");
+            return response.body().bytes();
         }
     }
 

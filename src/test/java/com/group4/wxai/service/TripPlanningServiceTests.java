@@ -209,6 +209,101 @@ class TripPlanningServiceTests {
     }
 
     @Test
+    void usesLlmExtractedDestinationInsteadOfPassingTheWholeSentenceToPlanner() {
+        service.handleTurn(USER_ID, "帮我规划", IntentResult.tripPlan(
+                0.99, "江油", "", "后天", "7天"
+        ));
+        when(toolRegistry.execute(TripPlanningTool.NAME, Map.of(
+                "origin", "江油",
+                "destination", "三亚",
+                "departure_time", "2026-08-22",
+                "duration", "7天"
+        ))).thenReturn("三亚七日行程");
+
+        TripPlanningService.TripPlanTurn turn = service.handleTurn(
+                USER_ID,
+                "我去三亚吧",
+                IntentResult.tripPlan(0.99, "", "三亚", "", "")
+        );
+
+        assertEquals("三亚七日行程", turn.reply());
+        assertTrue(turn.completed());
+        verify(toolRegistry).execute(TripPlanningTool.NAME, Map.of(
+                "origin", "江油",
+                "destination", "三亚",
+                "departure_time", "2026-08-22",
+                "duration", "7天"
+        ));
+    }
+
+    @Test
+    void rejectsAnUncleanModelDestinationInsteadOfPassingItToPlanner() {
+        service.handleTurn(USER_ID, "帮我规划", IntentResult.tripPlan(
+                0.99, "江油", "", "后天", "7天"
+        ));
+
+        TripPlanningService.TripPlanTurn turn = service.handleTurn(
+                USER_ID,
+                "我去三亚吧",
+                IntentResult.tripPlan(0.99, "", "我去三亚吧", "", "")
+        );
+
+        assertEquals("你想去哪里？请给我目的城市或地区；如果还没想好，可以直接说“帮我推荐”。", turn.reply());
+        assertEquals("", service.pendingDraft(USER_ID).orElseThrow().destination());
+        verify(toolRegistry, never()).execute(eq(TripPlanningTool.NAME), org.mockito.ArgumentMatchers.anyMap());
+    }
+
+    @Test
+    void treatsGenericSnowMountainAsPreferenceInsteadOfDestination() {
+        service.handleTurn(USER_ID, "帮我规划", IntentResult.tripPlan(
+                0.99, "江油", "", "后天", "7天"
+        ));
+        when(placeSearchTool.execute(Map.of("location", "江油", "keyword", "雪山景点")))
+                .thenReturn("高德雪山候选");
+        when(webSearchTool.execute(Map.of(
+                "query", "从江油出发 2026-08-22 7天 旅行目的地推荐 最新攻略 偏好：雪山"
+        ))).thenReturn("联网雪山候选");
+        when(llmService.chatText(eq("trip-destination-recommendation"), anyString(), eq(List.of())))
+                .thenReturn("可以考虑四姑娘山、达古冰川，你选哪一个？");
+
+        TripPlanningService.TripPlanTurn turn = service.handleTurn(
+                USER_ID,
+                "我更想看雪山",
+                IntentResult.tripPlan(0.99, "", "雪山", "", "", "")
+        );
+
+        assertEquals("可以考虑四姑娘山、达古冰川，你选哪一个？", turn.reply());
+        TripPlanDraft draft = service.pendingDraft(USER_ID).orElseThrow();
+        assertEquals("", draft.destination());
+        assertEquals("雪山", draft.preference());
+        verify(toolRegistry, never()).execute(eq(TripPlanningTool.NAME), org.mockito.ArgumentMatchers.anyMap());
+    }
+
+    @Test
+    void fillsMultipleFieldsFromOneSentenceWhenModelMissesSomeSlots() {
+        when(placeSearchTool.execute(Map.of("location", "江油", "keyword", "雪山景点")))
+                .thenReturn("高德雪山候选");
+        when(webSearchTool.execute(Map.of(
+                "query", "从江油出发 2026-08-21 7天 旅行目的地推荐 最新攻略 偏好：雪山"
+        ))).thenReturn("联网雪山候选");
+        when(llmService.chatText(eq("trip-destination-recommendation"), anyString(), eq(List.of())))
+                .thenReturn("雪山目的地候选");
+
+        TripPlanningService.TripPlanTurn turn = service.handleTurn(
+                USER_ID,
+                "明天从江油出发，玩7天，想看雪山，帮我推荐",
+                IntentResult.tripPlan(0.99, "", "RECOMMEND", "", "", "雪山")
+        );
+
+        assertEquals("雪山目的地候选", turn.reply());
+        TripPlanDraft draft = service.pendingDraft(USER_ID).orElseThrow();
+        assertEquals("江油", draft.origin());
+        assertEquals("2026-08-21", draft.departureTime());
+        assertEquals("7天", draft.duration());
+        assertEquals("雪山", draft.preference());
+    }
+
+    @Test
     void recommendsDestinationsWithAmapAndWebButWaitsForUserChoice() {
         when(placeSearchTool.execute(Map.of("location", "江油", "keyword", "旅游景点")))
                 .thenReturn("高德候选地点");
@@ -226,6 +321,68 @@ class TripPlanningServiceTests {
         assertFalse(turn.completed());
         assertEquals("", service.pendingDraft(USER_ID).orElseThrow().destination());
         verify(toolRegistry, never()).execute(eq(TripPlanningTool.NAME), org.mockito.ArgumentMatchers.anyMap());
+    }
+
+    @Test
+    void keepsCoastalPreferenceAcrossRecommendationAndFinalPlanning() {
+        when(placeSearchTool.execute(anyMap())).thenReturn("高德候选地点");
+        when(webSearchTool.execute(anyMap())).thenReturn("联网候选地点");
+        when(llmService.chatText(eq("trip-destination-recommendation"), anyString(), eq(List.of())))
+                .thenReturn("沿海候选有青岛、厦门。你选哪一个？");
+
+        service.handleTurn(USER_ID, "帮我推荐", IntentResult.tripPlan(
+                0.99, "江油", "RECOMMEND", "后天", "7天"
+        ));
+
+        String preferenceMessage = "我说海边啊，沿海懂吗";
+        assertTrue(service.shouldHandlePendingAnswer(
+                USER_ID, preferenceMessage, IntentResult.of(IntentType.CHAT, 0.95)
+        ));
+        TripPlanningService.TripPlanTurn recommendation = service.handleTurn(
+                USER_ID, preferenceMessage, IntentResult.of(IntentType.CHAT, 0.95)
+        );
+
+        assertEquals("沿海候选有青岛、厦门。你选哪一个？", recommendation.reply());
+        TripPlanDraft pending = service.pendingDraft(USER_ID).orElseThrow();
+        assertEquals("海边/沿海", pending.preference());
+        verify(placeSearchTool).execute(Map.of("location", "江油", "keyword", "海边景点"));
+        verify(webSearchTool).execute(Map.of(
+                "query", "从江油出发 2026-08-22 7天 旅行目的地推荐 最新攻略 偏好：海边/沿海"
+        ));
+
+        when(toolRegistry.execute(TripPlanningTool.NAME, Map.of(
+                "origin", "江油",
+                "destination", "青岛",
+                "departure_time", "2026-08-22",
+                "duration", "7天",
+                "preference", "海边/沿海"
+        ))).thenReturn("青岛七日行程");
+
+        TripPlanningService.TripPlanTurn completed = service.handleTurn(
+                USER_ID, "青岛", IntentResult.of(IntentType.CHAT, 0.95)
+        );
+
+        assertEquals("青岛七日行程", completed.reply());
+        assertTrue(completed.completed());
+        assertTrue(service.pendingDraft(USER_ID).isEmpty());
+    }
+
+    @Test
+    void latestDistancePreferenceOverridesTheEarlierOne() {
+        when(placeSearchTool.execute(anyMap())).thenReturn("高德候选地点");
+        when(webSearchTool.execute(anyMap())).thenReturn("联网候选地点");
+        when(llmService.chatText(eq("trip-destination-recommendation"), anyString(), eq(List.of())))
+                .thenReturn("候选列表");
+        service.handleTurn(USER_ID, "帮我推荐近一点的", IntentResult.tripPlan(
+                0.99, "江油", "RECOMMEND", "明天", "1天"
+        ));
+
+        service.handleTurn(USER_ID, "可以去远一点", IntentResult.of(IntentType.CHAT, 0.95));
+
+        assertEquals("可以远途", service.pendingDraft(USER_ID).orElseThrow().preference());
+        verify(webSearchTool).execute(Map.of(
+                "query", "从江油出发 2026-08-21 1天 旅行目的地推荐 最新攻略 偏好：可以远途"
+        ));
     }
 
     @Test

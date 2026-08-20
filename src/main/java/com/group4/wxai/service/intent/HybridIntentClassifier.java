@@ -133,13 +133,20 @@ public class HybridIntentClassifier implements IntentClassifier {
             WEB_SEARCH 时将完整但精简的搜索问题写入 slots.query，不要把“帮我搜索”“联网查一下”等前缀放入 query。
             WORLD_CLOCK 时提取 slots.location，例如“东京现在几点”应输出 location=东京，
             “UTC+5:30 是几点”应输出 location=UTC+5:30。未给城市或时区时默认 location=北京。
-            TRIP_PLAN 的 slots 必须始终严格使用下面的 JSON Schema；四个字段一个都不能省略，
+            TRIP_PLAN 的 slots 必须始终严格使用下面的 JSON Schema；五个字段一个都不能省略，
             用户没说的值必须写空字符串，禁止根据历史地点、IP、常识或模型判断自行猜测：
             {"type":"object","properties":{"origin":{"type":"string"},"destination":{"type":"string"},
-            "departure_time":{"type":"string"},"duration":{"type":"string"}},
-            "required":["origin","destination","departure_time","duration"],"additionalProperties":false}
+            "departure_time":{"type":"string"},"duration":{"type":"string"},"preference":{"type":"string"}},
+            "required":["origin","destination","departure_time","duration","preference"],"additionalProperties":false}
             origin 是出发城市或地区；destination 是用户确认的目的城市或地区；departure_time 是出行日期
-            和可选时刻；duration 是游玩时长。用户明确说没想好目的地并要求推荐时，destination 写 RECOMMEND。
+            和可选时刻；duration 是游玩时长；preference 是景观、距离、同行人、预算、节奏等偏好。
+            用户明确说没想好目的地并要求推荐时，destination 写 RECOMMEND。
+            destination 只能填写提取后的纯地点名称，不能复制整句话。例如“我去三亚吧”必须填写“三亚”，
+            “那就选海口东线”应填写“海口东线”；不能填写“我去三亚吧”或“那就选海口东线”。
+            “雪山”“海边”“草原”“古镇”“避暑”“亲子”等是偏好，不是明确目的地，应放入 preference；
+            “玉龙雪山”“青岛”“呼伦贝尔”这类专名才可以放入 destination。例如“明天从江油出发玩7天，
+            想看雪山，目的地你推荐”应输出 origin=江油、destination=RECOMMEND、departure_time=明天、
+            duration=7天、preference=雪山。当前消息没有偏好时 preference 必须为空字符串。
             信息不完整时仍输出 TRIP_PLAN、保留已知字段，并令 needsClarification=false；外部程序负责逐项询问，
             在四项齐全前不会调用任何出行工具。只有用户明确要求规划行程时才能使用 TRIP_PLAN。
             replyMode 只允许 AUTO、TEXT、VOICE。用户明确要求“用语音回答”时使用 VOICE，
@@ -387,7 +394,8 @@ public class HybridIntentClassifier implements IntentClassifier {
                     result.slot("origin"),
                     result.slot("destination"),
                     result.slot("departure_time"),
-                    result.slot("duration")
+                    result.slot("duration"),
+                    result.slot("preference")
             );
             result = new IntentResult(
                     normalized.intent(), normalized.confidence(), normalized.slots(), result.replyMode(), false, ""

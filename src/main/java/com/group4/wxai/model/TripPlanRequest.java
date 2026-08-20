@@ -11,7 +11,8 @@ public record TripPlanRequest(
         String origin,
         String destination,
         String departureTime,
-        String duration
+        String duration,
+        String preference
 ) {
 
     public static final String RECOMMEND_DESTINATION = "RECOMMEND";
@@ -21,6 +22,11 @@ public record TripPlanRequest(
         destination = clean(destination);
         departureTime = clean(departureTime);
         duration = clean(duration);
+        preference = clean(preference);
+    }
+
+    public TripPlanRequest(String origin, String destination, String departureTime, String duration) {
+        this(origin, destination, departureTime, duration, "");
     }
 
     public static TripPlanRequest fromSlots(Map<String, String> slots) {
@@ -29,7 +35,8 @@ public record TripPlanRequest(
                 safeSlots.get("origin"),
                 safeSlots.get("destination"),
                 safeSlots.get("departure_time"),
-                safeSlots.get("duration")
+                safeSlots.get("duration"),
+                safeSlots.get("preference")
         );
     }
 
@@ -39,6 +46,9 @@ public record TripPlanRequest(
         arguments.put("destination", destination);
         arguments.put("departure_time", departureTime);
         arguments.put("duration", duration);
+        if (!preference.isBlank()) {
+            arguments.put("preference", preference);
+        }
         return arguments;
     }
 
