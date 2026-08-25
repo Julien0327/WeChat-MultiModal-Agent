@@ -60,4 +60,8 @@ public class ToolRegistry {
     public Set<String> names() {
         return tools.keySet();
     }
+
+    public Map<String, AiTool> all() {
+        return tools;
+    }
 }
