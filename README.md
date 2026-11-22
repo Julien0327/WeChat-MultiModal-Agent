@@ -1,13 +1,48 @@
-# 微信多模态智能助手
+# 微信多模态智能助手 (WeChat Multi-Modal Agent)
+
+![Java](https://img.shields.io/badge/Java-17-orange?style=flat-square)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2.5-brightgreen?style=flat-square)
+![DashScope](https://img.shields.io/badge/LLM-Alibaba%20DashScope-blue?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-104-success?style=flat-square)
 
 基于 Spring Boot、微信 iLink SDK、微信公众号 SDK 和阿里云 DashScope 构建的微信智能助手。项目支持文本、图片和语音消息，并通过统一工具框架完成天气查询、联网搜索、出行规划、待办、记账、提醒等任务。
 
-## 项目能力
+A Java 17 / Spring Boot multi-modal AI assistant for WeChat, featuring hybrid intent recognition and a unified tool/skill capability layer.
+
+## English Summary
+
+**WeChat Multi-Modal Agent** is a Java 17 / Spring Boot 3.2 service that turns a personal WeChat account into a multi-modal AI assistant. It connects through the WeChat iLink SDK (QR-code login) and the WeChat Official Account callback, normalizes text, image, voice, and event messages, and replies with text, generated images, or synthesized speech.
+
+The conversation layer uses a hybrid intent pipeline: deterministic local rules handle explicit commands, while Qwen models extract structured intents, resolve omitted details from recent dialogue, and validate every argument before a tool runs. A unified `CapabilityRegistry` exposes 13 built-in tools — weather, place search, web search, trip planning, calculator, translation, todo, expense tracking, reminders, express tracking, and more — through a single interface. A `Skill` abstraction is reserved for composite, multi-step capabilities.
+
+**Engineering highlights**
+
+- **Multi-modal I/O**: image understanding and generation, ASR (`qwen3-asr-flash`), and TTS (`cosyvoice-v3-flash`), with automatic fallback to text.
+- **Strict tool calling**: missing parameters trigger a targeted follow-up question instead of a guess; conflicting or unverifiable requests are rejected.
+- **Graceful degradation**: when a model or external API is unavailable, the assistant returns an explicit message instead of fabricating a result.
+- **Per-user persistence**: todos, expenses, and reminders are stored per WeChat user ID.
+- **Extensible by design**: tools implement one interface and are auto-registered by Spring; the project ships with 104 unit and integration tests covering routing, intent classification, tools, and WeChat adapters.
+
+**Tech stack:** Java 17 · Spring Boot 3.2.5 · WxJava 4.6 · WeChat iLink SDK 2.3.3 · Alibaba Cloud DashScope (Qwen) · OkHttp · Jackson · JUnit 5
+
+> Setup and configuration: see [快速开始](#快速开始).
+
+## 项目亮点
+
+- **双通道微信接入**：iLink 扫码登录个人微信，同时保留微信公众号回调，两套通道共用同一套消息处理链路。
+- **混合意图识别**：本地规则处理明确指令，千问模型负责复杂表达的意图与参数抽取，并结合多轮上下文补全槽位。
+- **统一能力层**：13 个工具与 `Skill` 扩展点通过 `CapabilityRegistry` 统一发现和执行，新增能力只需实现一个接口。
+- **严格参数校验**：缺少地点、时间等必填参数时只追问缺失项，不猜测，也不误调用工具。
+- **安全降级**：模型、语音或外部接口不可用时返回明确提示，不伪造结果。
+- **可验证的工程实践**：104 个单元与集成测试覆盖消息路由、意图识别、工具执行和微信适配器。
+
+## 核心能力
 
 - 微信接入：支持 iLink 扫码登录，并保留微信公众号回调入口。
 - 多模态交互：支持文本对话、图片理解、图片生成、语音识别和语音合成。
 - 上下文理解：结合最近对话补全用户表达，支持连续追问和多轮参数收集。
-- 工具调用：所有工具统一注册、校验和执行，缺少必要参数时先询问，不猜测地点、时间或业务数据。
+- 工具调用：13 个工具统一注册、校验和执行，缺少必要参数时先询问，不猜测地点、时间或业务数据。
+- 能力扩展：`AiTool` 与 `Skill` 共用 `CapabilityRegistry` 入口，新增工具或组合技能无需改动消息路由。
 - 本地持久化：待办、账单和提醒按微信用户隔离保存。
 - 安全降级：模型、语音或外部接口暂时不可用时返回明确提示，避免伪造结果。
 
@@ -20,9 +55,9 @@
 | 大模型 | 阿里云 DashScope 千问系列模型 |
 | 网络请求 | OkHttp |
 | 数据处理 | Jackson |
-| 测试 | JUnit 5、Spring Boot Test |
+| 测试 | JUnit 5、Spring Boot Test（104 个测试） |
 
-## 处理流程
+## 架构与消息流程
 
 ```text
 微信消息
@@ -33,7 +68,7 @@
         ↓
 意图识别 + 上下文管理 + 参数校验
         ↓
-普通对话 / 多模态模型 / 工具注册中心
+普通对话 / 多模态模型 / 能力注册中心（Tool / Skill）
         ↓
 文字、图片或语音回复
 ```
@@ -50,6 +85,14 @@
 ### 2. 创建本地配置
 
 在项目根目录复制配置模板：
+
+macOS / Linux：
+
+```bash
+cp .env.example .env
+```
+
+Windows PowerShell：
 
 ```powershell
 Copy-Item .env.example .env
@@ -84,7 +127,7 @@ ILINK_SESSION_FILE=data/ilink-session.json
 
 ### 3. 测试并启动
 
-```powershell
+```bash
 mvn test
 mvn spring-boot:run
 ```
@@ -94,6 +137,8 @@ mvn spring-boot:run
 ## 微信接入
 
 ### iLink 扫码登录
+
+> 以下命令以 PowerShell 为例；macOS / Linux 可将 `Invoke-WebRequest` / `Invoke-RestMethod` 替换为 `curl`。
 
 应用启动后，通过管理接口生成二维码：
 
@@ -135,9 +180,9 @@ http(s)://你的域名/wx/msg
 
 公众号后台的 Token、AppID、AppSecret、消息加密模式和回调地址必须与本地配置保持一致。不使用公众号时，可只启用 iLink 通道。
 
-## 工具列表
+## 工具与能力
 
-项目通过 `AiTool` 接口定义工具，由 `ToolRegistry` 统一注册和执行。
+项目通过 `AiTool` 接口定义工具，由 `ToolRegistry` 统一注册和执行；`CapabilityRegistry` 向上提供统一的工具/技能发现入口，`Skill` 接口用于封装需要多步工具编排的组合能力（当前为扩展点）。
 
 | 工具 | 功能 | 数据来源或依赖 |
 | --- | --- | --- |
@@ -211,9 +256,11 @@ src/main/java/com/group4/wxai
 ├─ handler/                文本、图片、语音和事件消息处理
 ├─ model/                  意图、上下文、回复模式和出行参数模型
 └─ service/
+   ├─ capability/          工具与技能的统一发现和执行入口
    ├─ ilink/               iLink 会话、收发消息和媒体处理
    ├─ intent/              混合意图识别
    ├─ llm/                 DashScope 调用与回复整理
+   ├─ skill/               组合技能扩展点
    ├─ tool/                工具实现、注册、校验和本地数据存储
    ├─ weather/             天气查询
    └─ wx/                  公众号消息和媒体服务
@@ -222,7 +269,22 @@ src/test/java/             单元测试与集成测试
 .env.example               本地配置模板
 ```
 
-## 团队协作约定
+## 测试
+
+项目包含 104 个单元测试与集成测试，覆盖：
+
+- 消息路由与微信适配：`MessageRouter`、iLink 收发、媒体处理、公众号消息。
+- 意图识别：混合分类、缺参追问、多轮补全、上下文清理。
+- 工具执行：天气、地点、联网搜索、出行规划、世界时钟、团队工具等。
+- 能力层：`ToolRegistry`、`SkillRegistry`、`CapabilityRegistry` 的注册、冲突检测与执行。
+
+运行全部测试：
+
+```bash
+mvn test
+```
+
+## 开发约定
 
 1. 从最新主分支创建功能分支，分支名使用 `feature/<功能名>` 或 `fix/<问题名>`。
 2. API Key 和本地登录态只写入 `.env` 或 `data/`，禁止进入提交记录。
